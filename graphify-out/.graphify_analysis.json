@@ -1,0 +1,124 @@
+{
+  "communities": {
+    "0": [
+      "search_engine_searchengine",
+      "search_engine_searchengine_build_inverted_index",
+      "search_engine_searchengine_compute_tfidf",
+      "search_engine_searchengine_init",
+      "search_engine_searchengine_load_documents",
+      "search_engine_searchengine_make_snippet",
+      "search_engine_searchengine_posting_list",
+      "search_engine_searchengine_search",
+      "search_engine_searchengine_stats"
+    ],
+    "1": [
+      "static_script",
+      "static_script_emptystate",
+      "static_script_form",
+      "static_script_indexpanel",
+      "static_script_indexpanelbody",
+      "static_script_input",
+      "static_script_metaline",
+      "static_script_resultsel",
+      "static_script_toggleindexbtn"
+    ],
+    "2": [
+      "app",
+      "app_api_search",
+      "app_api_stats",
+      "app_api_term",
+      "app_home",
+      "app_rationale_1",
+      "app_rationale_47",
+      "route"
+    ],
+    "3": [
+      "search_engine",
+      "search_engine_rationale_1",
+      "search_engine_rationale_33",
+      "search_engine_tokenize"
+    ],
+    "4": [
+      "static_script_escapehtml",
+      "static_script_highlightsnippet",
+      "static_script_runsearch"
+    ]
+  },
+  "cohesion": {
+    "0": 0.3333333333333333,
+    "1": 0.2222222222222222,
+    "2": 0.35714285714285715,
+    "3": 0.5,
+    "4": 1.0
+  },
+  "gods": [
+    {
+      "id": "search_engine_searchengine",
+      "label": "SearchEngine",
+      "degree": 10
+    },
+    {
+      "id": "search_engine_tokenize",
+      "label": "tokenize()",
+      "degree": 4
+    },
+    {
+      "id": "app_api_term",
+      "label": "api_term()",
+      "degree": 3
+    },
+    {
+      "id": "static_script_escapehtml",
+      "label": "escapeHtml()",
+      "degree": 3
+    },
+    {
+      "id": "static_script_highlightsnippet",
+      "label": "highlightSnippet()",
+      "degree": 3
+    },
+    {
+      "id": "static_script_runsearch",
+      "label": "runSearch()",
+      "degree": 3
+    },
+    {
+      "id": "app_api_search",
+      "label": "api_search()",
+      "degree": 2
+    },
+    {
+      "id": "app_api_stats",
+      "label": "api_stats()",
+      "degree": 2
+    },
+    {
+      "id": "app_home",
+      "label": "home()",
+      "degree": 2
+    },
+    {
+      "id": "static_script_emptystate",
+      "label": "emptyState",
+      "degree": 1
+    }
+  ],
+  "surprises": [],
+  "questions": [
+    {
+      "type": "bridge_node",
+      "question": "Why does `SearchEngine` connect `Community 0` to `Community 2`, `Community 3`?",
+      "why": "High betweenness centrality (0.216) - this node is a cross-community bridge."
+    },
+    {
+      "type": "bridge_node",
+      "question": "Why does `tokenize()` connect `Community 3` to `Community 0`?",
+      "why": "High betweenness centrality (0.043) - this node is a cross-community bridge."
+    },
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `emptyState`, `form`, `indexPanel` to the rest of the system?",
+      "why": "8 weakly-connected nodes found - possible documentation gaps or missing edges."
+    }
+  ]
+}

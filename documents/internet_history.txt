@@ -1,0 +1,7 @@
+A Brief History of the Internet
+
+The internet began as a research project in the late 1960s, originally designed to let computers at different universities and research institutions communicate over a shared network. Early protocols allowed data to be broken into packets and routed across multiple paths, making the network resilient even if parts of it failed.
+
+During the 1990s, the invention of the World Wide Web made the internet accessible to ordinary people. Web browsers let users navigate linked pages using simple clicks, and search engines soon emerged to help people find relevant pages among a rapidly growing number of websites. Early search engines relied on simple keyword matching before more sophisticated ranking algorithms were developed.
+
+Today, the internet connects billions of devices and underpins everything from communication and commerce to entertainment and education. Search engines have evolved to understand context and relevance, using techniques such as inverted indexes and statistical ranking methods to return the most useful results almost instantly.

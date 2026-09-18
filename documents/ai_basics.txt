@@ -1,0 +1,7 @@
+Artificial Intelligence Basics
+
+Artificial intelligence is the branch of computer science focused on building systems that can perform tasks normally requiring human intelligence. These tasks include understanding language, recognizing images, making decisions, and learning from experience. Machine learning is a subset of artificial intelligence where algorithms improve automatically through exposure to data rather than being explicitly programmed for every rule.
+
+Deep learning, a further subset, uses layered neural networks to model complex patterns in large amounts of data. This approach has driven major progress in speech recognition, computer vision, and natural language processing. Modern search engines, recommendation systems, and virtual assistants all rely heavily on these techniques.
+
+Despite the excitement around artificial intelligence, most practical systems today are narrow, meaning they perform one task well but do not possess general reasoning ability. Building safe and reliable intelligent systems remains an active area of research.

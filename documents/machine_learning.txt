@@ -1,0 +1,7 @@
+Machine Learning Fundamentals
+
+Machine learning is a way of building systems that learn patterns from data instead of following hand written rules. A typical machine learning workflow involves collecting a dataset, splitting it into training and testing portions, choosing an algorithm, training a model, and evaluating how well it generalizes to new, unseen data.
+
+Common types of machine learning include supervised learning, where models learn from labeled examples to predict outcomes, unsupervised learning, where models find structure in unlabeled data, and reinforcement learning, where an agent learns by receiving rewards or penalties for its actions. Each approach suits different kinds of problems, from spam detection to recommendation systems to game playing agents.
+
+Feature engineering, choosing the right algorithm, and avoiding overfitting are central challenges in machine learning projects. Text based tasks, such as search ranking and document classification, often rely on techniques like term frequency inverse document frequency weighting to convert words into meaningful numerical representations.

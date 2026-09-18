@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Mini Search Engine - Vector space search engine using TF-IDF weighting and cosine similarity ranking." />
+  <title>Mini Search Engine · Vector Space Search</title>
+  
+  <!-- Modern Typography: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <!-- Ambient gradient mesh & glowing blurred orbs -->
+  <div class="bg-ambient" aria-hidden="true">
+    <div class="mesh-gradient"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="orb orb-4"></div>
+    <div class="grid-texture"></div>
+  </div>
+
+  <div class="wrap glass-container">
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            <path d="m11 8 3 3-3 3"></path>
+          </svg>
+        </div>
+        <span class="brand-text">mini-search-engine</span>
+        <span class="brand-pill">TF-IDF &bull; Cosine Similarity</span>
+      </div>
+
+      <div class="index-status" id="indexStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">index ready · <strong>{{ doc_count }}</strong> documents</span>
+      </div>
+    </header>
+
+    <main>
+      <div class="hero-section">
+        <div class="hero-badge">
+          <span class="hero-badge-dot"></span>
+          <span>Vector Space Information Retrieval</span>
+        </div>
+        <h1>Search your documents with <span class="gradient-text">mathematical precision</span></h1>
+        <p class="sub">Ranked by TF&#8209;IDF term vectors and cosine similarity, not keyword luck.</p>
+      </div>
+
+      <form id="searchForm" class="search-row glass-panel" autocomplete="off">
+        <span class="prompt" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </span>
+        <input
+          type="text"
+          id="queryInput"
+          placeholder="Try: machine learning ranking, climate energy, python..."
+          aria-label="Search query"
+        />
+        <button type="button" id="clearBtn" class="clear-btn" aria-label="Clear query" title="Clear search" style="display: none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+        <button type="submit" class="btn-primary" id="searchBtn">
+          <span>Search</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </button>
+      </form>
+
+      <div class="suggestions-row">
+        <span class="suggestions-label">Try queries:</span>
+        <div class="chips-list">
+          <button type="button" class="query-chip" data-query="machine learning ranking">machine learning</button>
+          <button type="button" class="query-chip" data-query="climate change energy">climate change</button>
+          <button type="button" class="query-chip" data-query="space exploration mars">space exploration</button>
+          <button type="button" class="query-chip" data-query="python programming data">python programming</button>
+        </div>
+      </div>
+
+      <div id="metaLine" class="meta-line" aria-live="polite"></div>
+
+      <ol id="results" class="results"></ol>
+
+      <div id="emptyState" class="empty-state glass-card">
+        <div class="empty-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <circle cx="11.5" cy="14.5" r="2.5"></circle>
+            <path d="m13.5 16.5 2.5 2.5"></path>
+          </svg>
+        </div>
+        <h3 class="empty-title">Ready to explore</h3>
+        <p class="empty-desc">
+          Type a query above or choose a suggested topic. Results are scored by comparing your query's
+          TF&#8209;IDF vector against every document's vector — the closer the angle between them, the higher a document ranks.
+        </p>
+        <div class="empty-features">
+          <div class="feature-item">
+            <span class="feature-badge">1</span>
+            <span>Sublinear TF Dampening</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-badge">2</span>
+            <span>Smooth Corpus IDF</span>
+          </div>
+          <div class="feature-item">
+            <span class="feature-badge">3</span>
+            <span>Cosine Angle Ranking</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <button id="toggleIndex" class="link-btn glass-btn">
+        <span class="toggle-text">How the index works</span>
+        <svg class="chevron-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+      <div id="indexPanel" class="index-panel glass-card hidden">
+        <div id="indexPanelBody">loading index stats…</div>
+      </div>
+    </footer>
+
+  </div>
+
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
