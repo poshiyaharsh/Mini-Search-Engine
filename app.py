@@ -53,9 +53,10 @@ logging.basicConfig(
 logger = logging.getLogger("MiniSearchEngine")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DOC_DIR = os.path.join(BASE_DIR, "documents")
-CRAWLED_DIR = os.path.join(BASE_DIR, "crawled_pages")
-INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
+DATA_DIR = os.environ.get("DATA_DIR", BASE_DIR)
+DOC_DIR = os.environ.get("DOC_DIR", os.path.join(DATA_DIR, "documents"))
+CRAWLED_DIR = os.environ.get("CRAWLED_DIR", os.path.join(DATA_DIR, "crawled_pages"))
+INSTANCE_DIR = os.environ.get("INSTANCE_DIR", os.path.join(DATA_DIR, "instance"))
 
 os.makedirs(DOC_DIR, exist_ok=True)
 os.makedirs(CRAWLED_DIR, exist_ok=True)
@@ -63,18 +64,39 @@ os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 app = Flask(__name__)
 
-# Security & Storage Configuration
-app.config["SECRET_KEY"] = os.environ.get(
-    "SECRET_KEY", "mini-search-engine-dev-secret-key-38f90a9b2c1e4d"
+is_production = (
+    os.environ.get("FLASK_ENV") == "production"
+    or os.environ.get("RENDER") == "true"
+    or os.environ.get("RAILWAY_ENVIRONMENT") is not None
 )
-app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(INSTANCE_DIR, 'app.db')}"
+
+# Security & Storage Configuration
+secret_key = os.environ.get("SECRET_KEY")
+if not secret_key:
+    if is_production:
+        logger.warning("SECRET_KEY environment variable not set! Generating random key for this session.")
+        secret_key = os.urandom(32).hex()
+    else:
+        secret_key = "mini-search-engine-dev-secret-key-38f90a9b2c1e4d"
+app.config["SECRET_KEY"] = secret_key
+
+# Support DATABASE_URL (Render Postgres, Railway Postgres, or custom SQLite)
+raw_db_url = os.environ.get("DATABASE_URL")
+if raw_db_url:
+    # Normalize legacy postgres:// scheme to postgresql:// for SQLAlchemy >= 1.4
+    if raw_db_url.startswith("postgres://"):
+        raw_db_url = raw_db_url.replace("postgres://", "postgresql://", 1)
+    app.config["SQLALCHEMY_DATABASE_URI"] = raw_db_url
+else:
+    app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(INSTANCE_DIR, 'app.db')}"
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1MB max payload
 
 # Session Cookie Security
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
+app.config["SESSION_COOKIE_SECURE"] = is_production
 
 # Initialize Extensions
 csrf = CSRFProtect(app)
@@ -329,6 +351,16 @@ def api_delete_saved_search(search_id: int):
 # ------------------------------------------------------------------
 # Search & Discovery Routes
 # ------------------------------------------------------------------
+@app.route("/healthz")
+def healthz():
+    """Liveness probe / health check endpoint for Render, Railway, Fly.io."""
+    return jsonify({
+        "status": "healthy",
+        "documents_indexed": engine.N,
+        "environment": "production" if is_production else "development",
+    }), 200
+
+
 @app.route("/")
 def home():
     return render_template("index.html", doc_count=engine.N)
@@ -573,4 +605,5 @@ with app.app_context():
 
 if __name__ == "__main__":
     flask_debug = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true")
-    app.run(debug=flask_debug, host="127.0.0.1", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=flask_debug, host="0.0.0.0", port=port)

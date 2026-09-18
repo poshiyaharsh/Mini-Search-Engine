@@ -25,6 +25,14 @@ class TestPublicAPI:
         assert b"Sign In" in res.data
         assert b"Sign Up" in res.data
 
+    def test_healthz_endpoint(self, client):
+        res = client.get("/healthz")
+        assert res.status_code == 200
+        data = res.get_json()
+        assert data["status"] == "healthy"
+        assert "documents_indexed" in data
+        assert "environment" in data
+
     def test_search_valid_query(self, client):
         res = client.get("/api/search?q=machine&algo=bm25")
         assert res.status_code == 200

@@ -172,12 +172,58 @@ Open **`http://127.0.0.1:5000`** in your browser.
 # Install development and test dependencies
 pip install -r requirements-dev.txt
 
-# Run all 57 automated tests
+# Run all 58 automated tests
 pytest -v
 
 # Run tests with code coverage breakdown
 pytest --cov=. --cov-report=term-missing
 ```
+
+---
+
+## Deploy to Production (Render)
+
+This repository is pre-configured for instant zero-downtime deployment on **[Render](https://render.com)** (as well as Railway, Fly.io, or Heroku via WSGI standard `Procfile`).
+
+### Option A: 1-Click Render Blueprint (Recommended)
+1. Push or fork this repository to your GitHub account.
+2. Sign in to your [Render Dashboard](https://dashboard.render.com).
+3. Click **New +** > **Blueprint**.
+4. Connect your `Mini-Search-Engine` GitHub repository.
+5. Render detects [`render.yaml`](render.yaml), configures the Python 3.12 environment, installs dependencies, sets up the Gunicorn WSGI start command, wires the `/healthz` health check, and generates a cryptographically secure `SECRET_KEY`.
+6. Click **Apply** — your search engine will be live at an HTTPS URL (e.g. `https://mini-search-engine-xxxx.onrender.com`).
+
+### Option B: Manual Web Service Setup
+1. On the [Render Dashboard](https://dashboard.render.com), click **New +** > **Web Service**.
+2. Connect your GitHub repository.
+3. Configure the following service settings:
+   - **Runtime:** `Python`
+   - **Branch:** `main`
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `gunicorn --workers 2 --threads 4 --timeout 120 --access-logfile - --error-logfile - app:app`
+   - **Health Check Path:** `/healthz`
+4. Under **Environment Variables**, configure:
+   | Variable | Recommended Value | Purpose |
+   | :--- | :--- | :--- |
+   | `FLASK_ENV` | `production` | Enables secure session cookies and production defaults |
+   | `FLASK_DEBUG` | `0` | Disables Flask debug mode and suppresses error traces |
+   | `PYTHON_VERSION` | `3.12.10` | Specifies Python 3.12 build image |
+   | `SECRET_KEY` | *(Click "Generate" or random 32-byte hex)* | Encrypts session cookies & CSRF tokens |
+5. Click **Create Web Service**.
+
+### Persistent Storage & Production Database Notes
+- **Default (SQLite):** Out of the box, user accounts and search history are stored in SQLite (`instance/app.db`), and corpus documents are indexed on startup. On Render's free tier, the container filesystem is ephemeral (resets on sleep/restart).
+- **Persistent Disk (Optional):** To retain newly crawled web pages and SQLite accounts across container restarts on Render, attach a Persistent Disk mounted at `/var/data` and set `DATA_DIR=/var/data`.
+- **Managed PostgreSQL (Optional):** For enterprise user persistence, create a Render PostgreSQL database, copy its **Internal Database URL**, and set `DATABASE_URL` in your web service. The app automatically converts legacy `postgres://` to `postgresql://` and boots tables on startup.
+
+### Verifying the Live Deployment
+Once deployed, verify your live search engine:
+1. Visit `https://<your-service>.onrender.com/healthz` — returns HTTP 200:
+   ```json
+   {"status": "healthy", "documents_indexed": 12, "environment": "production"}
+   ```
+2. Search a query (e.g. `"search engine inverted index"` with BM25).
+3. Register a user account, bookmark queries, and verify instant suggestions.
 
 ---
 
@@ -204,13 +250,16 @@ If scaling this system to web-scale volumes, the following architectural upgrade
 
 ```
 mini-search-engine/
-├── app.py                      # Flask REST APIs, authentication controllers, error handling
+├── app.py                      # Flask REST APIs, authentication controllers, error handling, health check
 ├── search_engine.py            # Core IR: Tokenizer, PrefixTrie, inverted index, BM25 & Cosine
 ├── crawler.py                  # Polite BFS web crawler: robots.txt compliance, SSRF defense
 ├── models.py                   # SQLAlchemy database models: User and SavedSearch
 ├── forms.py                    # Flask-WTF validation forms (CSRF, email, password length)
-├── requirements.txt            # Production runtime dependencies
+├── requirements.txt            # Production runtime dependencies (Flask, Gunicorn, etc.)
 ├── requirements-dev.txt        # Testing dependencies (pytest, pytest-cov, responses)
+├── Procfile                    # WSGI process definition for Render, Railway, Heroku
+├── render.yaml                 # Render Blueprint specification for infrastructure as code
+├── .env.example                # Documented template for production environment variables
 ├── pytest.ini                  # Pytest configuration and pythonpath routing
 ├── LICENSE                     # MIT License
 ├── .gitignore                  # Git ignore rules for database, cache, and virtual environments
