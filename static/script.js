@@ -1,6 +1,12 @@
 /**
- * Mini Search Engine - Frontend Logic
+ * Mini Search Engine - Hardened Frontend Logic
  * Connects to Flask /api/search, /api/stats, and /api/crawl
+ *
+ * Security & Bug Hardening:
+ *  - Comprehensive HTML escaping (&, <, >, ", ')
+ *  - Protocol sanitization on links (strictly http/https, blocking javascript:/data:)
+ *  - Injection-safe snippet highlighting
+ *  - Robust fetch error handling with explicit status checks & user-facing error reporting
  */
 
 const form = document.getElementById("searchForm");
@@ -25,28 +31,60 @@ const maxDepthInput = document.getElementById("maxDepthInput");
 const crawlSubmitBtn = document.getElementById("crawlSubmitBtn");
 const crawlerStatus = document.getElementById("crawlerStatus");
 
-// Cache initial empty state HTML for restoration
 const initialEmptyStateHtml = emptyState ? emptyState.innerHTML : "";
 
+// ------------------------------------------------------------------
+// XSS Sanitization & URL Verification
+// ------------------------------------------------------------------
 function escapeHtml(str) {
-  if (!str) return "";
+  if (str === null || str === undefined) return "";
   return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeUrl(url) {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  // Strictly enforce http and https schemes to prevent javascript: or data: XSS
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return "";
 }
 
 function highlightSnippet(snippet, queryWords) {
-  const escaped = escapeHtml(snippet);
-  if (!queryWords.length) return escaped;
-  const pattern = new RegExp(
-    "\\b(" + queryWords.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")\\b",
-    "gi"
-  );
-  return escaped.replace(pattern, (m) => `<mark>${m}</mark>`);
+  if (!snippet) return "";
+  if (!queryWords || !queryWords.length) return escapeHtml(snippet);
+
+  const escapedWords = queryWords
+    .filter(Boolean)
+    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+
+  if (!escapedWords.length) return escapeHtml(snippet);
+
+  const pattern = new RegExp("\\b(" + escapedWords.join("|") + ")\\b", "gi");
+
+  let result = "";
+  let lastIndex = 0;
+  let match;
+
+  // Split on raw text to guarantee HTML entities cannot be corrupted
+  while ((match = pattern.exec(snippet)) !== null) {
+    result += escapeHtml(snippet.slice(lastIndex, match.index));
+    result += `<mark>${escapeHtml(match[0])}</mark>`;
+    lastIndex = pattern.lastIndex;
+  }
+  result += escapeHtml(snippet.slice(lastIndex));
+  return result;
 }
 
+// ------------------------------------------------------------------
+// UI State Helpers
+// ------------------------------------------------------------------
 function resetToDefaultState() {
   resultsEl.innerHTML = "";
   metaLine.innerHTML = "";
@@ -60,6 +98,9 @@ function resetToDefaultState() {
   }
 }
 
+// ------------------------------------------------------------------
+// Search Execution
+// ------------------------------------------------------------------
 async function runSearch(query) {
   const trimmed = query.trim();
   if (!trimmed) {
@@ -67,15 +108,18 @@ async function runSearch(query) {
     return;
   }
 
-  // Loading state
   metaLine.textContent = "computing TF-IDF cosine similarities…";
   resultsEl.innerHTML = "";
 
   try {
     const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
 
-    if (data.total_indexed && docCountBadge) {
+    if (!res.ok) {
+      throw new Error(data.error || `Server returned error code ${res.status}`);
+    }
+
+    if (data.total_indexed !== undefined && docCountBadge) {
       docCountBadge.textContent = data.total_indexed;
     }
 
@@ -102,7 +146,6 @@ async function runSearch(query) {
       return;
     }
 
-    // Hide empty state when results exist
     if (emptyState) {
       emptyState.classList.add("hidden");
       emptyState.style.display = "none";
@@ -111,15 +154,17 @@ async function runSearch(query) {
     metaLine.textContent = `${data.count} result${data.count === 1 ? "" : "s"} for "${data.query}" — ranked by vector cosine similarity`;
 
     const queryWords = data.query.toLowerCase().split(/\s+/).filter(Boolean);
-    const maxScore = data.results[0].score || 1;
+    const maxScore = (data.results[0] && data.results[0].score) || 1;
 
     data.results.forEach((r, i) => {
       const li = document.createElement("li");
       li.className = "result";
-      li.style.animationDelay = `${i * 50}ms`;
+      li.style.animationDelay = `${Math.min(i * 50, 400)}ms`;
       const pct = Math.max(6, Math.round((r.score / maxScore) * 100));
 
       const isWeb = r.source === "web";
+      const safeLink = sanitizeUrl(r.url);
+
       const sourceBadgeHtml = isWeb
         ? `<span class="source-tag source-web" title="Crawled from live web page">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
@@ -130,8 +175,8 @@ async function runSearch(query) {
             Local Doc
           </span>`;
 
-      const titleHtml = isWeb && r.url
-        ? `<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer" class="result-link" title="Open ${escapeHtml(r.url)} in new tab">
+      const titleHtml = (isWeb && safeLink)
+        ? `<a href="${escapeHtml(safeLink)}" target="_blank" rel="noopener noreferrer" class="result-link" title="Open ${escapeHtml(safeLink)} in new tab">
             ${escapeHtml(r.title || r.filename)}
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
           </a>`
@@ -157,19 +202,20 @@ async function runSearch(query) {
       resultsEl.appendChild(li);
     });
   } catch (err) {
-    metaLine.textContent = "error fetching search results";
+    metaLine.textContent = `Search error: ${err.message}`;
     console.error("Search fetch error:", err);
   }
 }
 
-// Form submit event
+// ------------------------------------------------------------------
+// Event Listeners
+// ------------------------------------------------------------------
 form.addEventListener("submit", (e) => {
   e.preventDefault();
   const q = input.value.trim();
   if (q) runSearch(q);
 });
 
-// Clear button logic
 if (clearBtn) {
   clearBtn.addEventListener("click", () => {
     input.value = "";
@@ -178,7 +224,6 @@ if (clearBtn) {
   });
 }
 
-// Input change listener for clear button toggle
 input.addEventListener("input", () => {
   if (clearBtn) {
     clearBtn.style.display = input.value.length > 0 ? "flex" : "none";
@@ -188,7 +233,6 @@ input.addEventListener("input", () => {
   }
 });
 
-// Suggestion chip quick search
 document.addEventListener("click", (e) => {
   const chip = e.target.closest(".query-chip");
   if (chip && chip.dataset.query) {
@@ -216,7 +260,6 @@ function toggleCrawler() {
 
 if (toggleCrawlerEl) {
   toggleCrawlerEl.addEventListener("click", (e) => {
-    // Avoid double toggle if user clicks the button directly
     if (e.target.closest("#crawlerToggleBtn") && e.currentTarget !== e.target) return;
     toggleCrawler();
   });
@@ -246,7 +289,7 @@ if (crawlerForm) {
     crawlerStatus.classList.remove("hidden");
     crawlerStatus.innerHTML = `
       <span class="spinner"></span>
-      <span>Checking robots.txt and crawling up to <strong>${max_pages}</strong> page(s)...</span>
+      <span>Checking robots.txt & SSRF safety rules, crawling up to <strong>${max_pages}</strong> page(s)...</span>
     `;
 
     try {
@@ -255,7 +298,11 @@ if (crawlerForm) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ seed_urls, max_pages, max_depth }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || `Crawl request failed with HTTP ${res.status}`);
+      }
 
       if (data.success) {
         crawlerStatus.className = "crawler-status status-success";
@@ -268,19 +315,21 @@ if (crawlerForm) {
         if (data.crawled_pages && data.crawled_pages.length > 0) {
           summaryHtml += `<ul class="crawled-summary-list">`;
           data.crawled_pages.forEach((p) => {
-            summaryHtml += `<li><strong>${escapeHtml(p.title)}</strong> &mdash; <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline;">${escapeHtml(p.url)}</a></li>`;
+            const safePUrl = sanitizeUrl(p.url);
+            summaryHtml += `<li><strong>${escapeHtml(p.title)}</strong> &mdash; <a href="${escapeHtml(safePUrl || '#')}" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">${escapeHtml(p.url)}</a></li>`;
           });
           summaryHtml += `</ul>`;
         }
+        if (data.errors && data.errors.length > 0) {
+          summaryHtml += `<div style="margin-top:8px; font-size:12px; opacity:0.85;">Warnings: ${data.errors.map(escapeHtml).join("; ")}</div>`;
+        }
         crawlerStatus.innerHTML = summaryHtml;
 
-        // Update badge
-        if (docCountBadge) docCountBadge.textContent = data.total_documents;
-
-        // Invalidate cached stats
+        if (docCountBadge && data.total_documents !== undefined) {
+          docCountBadge.textContent = data.total_documents;
+        }
         if (indexPanelBody) delete indexPanelBody.dataset.loaded;
 
-        // Re-run existing query if present to immediately show new results
         const currentQ = input.value.trim();
         if (currentQ) runSearch(currentQ);
       } else {
@@ -289,7 +338,7 @@ if (crawlerForm) {
       }
     } catch (err) {
       crawlerStatus.className = "crawler-status status-error";
-      crawlerStatus.textContent = `Crawl request failed: ${err.message}`;
+      crawlerStatus.textContent = `Crawl error: ${err.message}`;
       console.error("Crawl error:", err);
     } finally {
       crawlSubmitBtn.disabled = false;
@@ -326,6 +375,9 @@ toggleIndexBtn.addEventListener("click", async () => {
   if (isHidden && indexPanelBody.dataset.loaded !== "true") {
     try {
       const res = await fetch("/api/stats");
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
+      }
       const stats = await res.json();
       const localCount = stats.num_local_documents || stats.num_documents;
       const webCount = stats.num_web_documents || 0;
@@ -365,15 +417,15 @@ toggleIndexBtn.addEventListener("click", async () => {
         </div>
         <div class="stats-algorithm">
           <div class="stats-section-title">TF-IDF &amp; Crawler Architecture</div>
-          <p><strong>1. Web Crawler:</strong> Breadth-first crawl respecting <code>robots.txt</code> via <code>urllib.robotparser</code>, stripping HTML boilerplate and extracting text.</p>
-          <p><strong>2. Inverted Index:</strong> Maps each unique word to a posting list of <code>{document_id: term_frequency}</code> across both local notes and web pages.</p>
+          <p><strong>1. Web Crawler:</strong> Breadth-first crawl respecting <code>robots.txt</code> and SSRF defenses, extracting sanitized text.</p>
+          <p><strong>2. Inverted Index:</strong> Maps each unique word to a posting list of <code>{document_id: term_frequency}</code> across local notes and web pages.</p>
           <p><strong>3. Dampened TF-IDF:</strong> Weights balance occurrence with rarity: <code>weight = (1 + ln(tf)) &times; (ln((1+N)/(1+df)) + 1)</code>.</p>
           <p><strong>4. Cosine Similarity Ranking:</strong> Measures the normalized angle between the query vector and candidate document vectors: <code>sim(q, d) = (q &middot; d) / (||q|| &times; ||d||)</code>.</p>
         </div>
       `;
       indexPanelBody.dataset.loaded = "true";
     } catch (err) {
-      indexPanelBody.textContent = "Failed to load index stats.";
+      indexPanelBody.textContent = `Failed to load index stats: ${err.message}`;
       console.error(err);
     }
   }

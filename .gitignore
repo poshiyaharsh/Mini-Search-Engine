@@ -1,0 +1,26 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments & secrets
+.env
+.env.*
+*.env
+venv/
+.venv/
+env/
+
+# Editor & IDE configs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Transient logs & test scratch files
+*.log
+scratch/
