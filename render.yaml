@@ -3,7 +3,7 @@ services:
     name: mini-search-engine
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 2 --threads 4 --timeout 120 --access-logfile - --error-logfile - app:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120 --access-logfile - --error-logfile - app:app
     healthCheckPath: /healthz
     envVars:
       - key: FLASK_ENV

@@ -1,143 +1,108 @@
 # Mini Search Engine
 
-A lightweight, from-scratch search engine and web crawler built in Python and Flask—implementing Okapi BM25 and vector-space Cosine TF-IDF ranking, an inverted index, real-time Prefix Trie autocomplete, SSRF-hardened web crawling, user accounts, and saved searches, all wrapped in a glassmorphism interface.
-
-[![Tests & Coverage](https://github.com/poshiyaharsh/Mini-Search-Engine/actions/workflows/tests.yml/badge.svg)](https://github.com/poshiyaharsh/Mini-Search-Engine/actions/workflows/tests.yml)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
-[![Flask](https://img.shields.io/badge/framework-Flask-lightgrey.svg)](https://flask.palletsprojects.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Coverage: 88%](https://img.shields.io/badge/coverage-88%25-brightgreen.svg)](tests/)
-
----
-
-## Visual Demo
-
-![Mini Search Engine Demo](docs/demo.png)
-> *Tip: Replace `docs/demo.png` with a screen recording GIF showing a live query typed into the search bar, instant Prefix Trie suggestions, BM25 ranked result cards, and the collapsible "Saved Searches" drawer.*
+A full-text search engine built from scratch in Python and Flask. It indexes local text documents and crawled web pages using an inverted index, ranking results with Okapi BM25 and TF-IDF with Cosine Similarity. The project demonstrates core Information Retrieval (IR) principles, replacing basic substring matching with statistical term weighting, document length normalization, and phrase match boosting. User accounts, search history, and query bookmarking are persisted locally with SQLite and SQLAlchemy.
 
 ---
 
 ## Features
 
-- **From-Scratch Information Retrieval (No Lucene/Elasticsearch):** Every algorithm, data structure, and mathematical formula is implemented directly in plain Python.
-- **Okapi BM25 Ranking (Default):** Industry-standard IR ranking incorporating asymptotic term saturation ($k_1 = 1.5$), document length normalization ($b = 0.75$), and Robertson-Spärck Jones IDF.
-- **Phrase-Match Boosting:** Multi-word queries appearing as exact contiguous sequences receive an automatic **$+30\%$ ($1.3\times$) score boost**.
-- **Comparative Cosine TF-IDF:** Switch algorithms on the fly to inspect and compare vector space angular similarities with sublinear TF scaling.
-- **Prefix Trie Autocomplete:** Instant, real-time query suggestions ranked descending by corpus document frequency (`df`), debounced at 250ms with full keyboard arrow navigation.
-- **Multi-Dimensional Filtering:** Dynamically isolate results by source (`All`, `Local Docs`, `Crawled Web`) and set minimum score cutoffs (`> 0.05` to `> 0.50`).
-- **Polite & SSRF-Hardened Web Crawler:** Breadth-first crawler respecting `robots.txt`, enforcing a 1-second domain delay, and blocking loopback, RFC 1918 private subnets, and cloud metadata IPs (`169.254.169.254`).
-- **User Accounts & Saved Searches:** Session authentication via Flask-Login, `scrypt` password hashing, Flask-WTF CSRF protection, and strictly isolated, one-click saved search bookmarking backed by SQLite.
-- **Automated Test Suite (88% Coverage):** 57 automated unit and integration tests using `pytest`, `pytest-cov`, and `responses` for mocked HTTP, running via GitHub Actions CI.
+- **Information Retrieval & Ranking:**
+  - **Okapi BM25:** Probabilistic ranking model with term frequency saturation ($k_1 = 1.5$), document length normalization ($b = 0.75$), and Robertson-Spärck Jones Inverse Document Frequency (IDF).
+  - **TF-IDF with Cosine Similarity:** Vector Space Model with sublinear term frequency scaling ($1 + \log(\text{tf})$) and L2 vector normalization.
+  - **Exact Phrase Match Boosting:** Applies a configurable score boost (+30%) when query terms appear as consecutive phrases in document text.
+- **Inverted Index:**
+  - In-memory dictionary mapping terms to postings lists containing document IDs and term frequencies for fast lookup without scanning raw document files.
+- **Prefix Trie Autocomplete:**
+  - In-memory prefix tree providing keystroke-by-keystroke query suggestions ranked by corpus document frequency.
+- **Search Filters:**
+  - **Source Filtering:** Scope queries to local documents, crawled web pages, or all indexed content.
+  - **Relevance Cutoff:** Filter out low-confidence results below a minimum score threshold.
+- **Polite Web Crawler:**
+  - Breadth-First Search (BFS) crawling with configurable maximum pages and traversal depth limits.
+  - `robots.txt` compliance parsing and polite per-host request delays.
+  - Server-Side Request Forgery (SSRF) validation blocking private subnets, loopback addresses, cloud metadata endpoints, and non-HTTP protocols.
+  - HTML text extraction stripping scripts, styles, navigation, and boilerplate markup.
+- **User Accounts & Saved Searches:**
+  - User registration, login, and session persistence using Flask-Login and salted password hashing (`werkzeug.security`).
+  - Cross-Site Request Forgery (CSRF) protection on all form submissions via Flask-WTF.
+  - Per-user query history and bookmarking with strict user-level access isolation.
+- **Automated Test Suite:**
+  - 58 unit and integration tests covering the tokenizer, trie, inverted index, ranking models, crawler security, API endpoints, and authentication routes.
+  - 88% test coverage verified with `pytest` and `pytest-cov`.
 
 ---
 
-## Architecture & System Design
+## Project Structure
 
-```mermaid
-flowchart TD
-    subgraph Client["Frontend Client (Vanilla Glassmorphism UI)"]
-        SearchUI["Interactive Search Bar & Filter Controls"]
-        SuggestUI["Prefix Autocomplete Dropdown"]
-        AuthUI["Sign In / Sign Up / User Dropdown"]
-        SavedUI["Saved Searches Drawer"]
-    end
-
-    subgraph Backend["Flask Application Layer (app.py)"]
-        Routes["REST Endpoints & HTML Controllers"]
-        CSRF["Flask-WTF CSRF & Rate Limiter (5/min)"]
-        AuthManager["Flask-Login Session Manager"]
-    end
-
-    subgraph CoreEngine["Information Retrieval Core (search_engine.py)"]
-        Trie["Prefix Trie\n(df-ordered vocabulary)"]
-        Tokenizer["Tokenizer & Stopword Filter\n(Regex, length bounds)"]
-        InvertedIndex["Inverted Index\nword -> {doc_id: term_frequency}"]
-        BM25["Okapi BM25 Scorer\n(Term saturation + Length norm)"]
-        Cosine["Cosine Similarity Scorer\n(Normalized unit vectors)"]
-        PhraseBooster["Contiguous Phrase Matcher\n(+30% score multiplier)"]
-    end
-
-    subgraph CrawlerModule["Web Crawler (crawler.py)"]
-        Crawler["Polite BFS Crawler\n(Queue, max_depth, max_pages)"]
-        Robots["robots.txt Parser\n(urllib.robotparser)"]
-        SSRFGuard["SSRF Security Filter\n(DNS & IP pre-screening)"]
-    end
-
-    subgraph DataStorage["Data Persistence"]
-        SQLite[("SQLite (instance/app.db)\nUsers & SavedSearches")]
-        CorpusDir[("Corpus Files\ndocuments/ & crawled_pages/")]
-    end
-
-    SearchUI -->|"GET /api/search?q=...&algo=...&source=..."| Routes
-    SuggestUI -->|"GET /api/suggest?prefix=..."| Routes
-    AuthUI -->|"POST /login, /signup, /logout"| Routes
-    SavedUI -->|"GET / POST / DELETE /api/searches"| Routes
-    SearchUI -->|"POST /api/crawl"| Routes
-
-    Routes --> CSRF
-    Routes --> AuthManager
-    AuthManager <--> SQLite
-    Routes <--> SQLite
-
-    Routes --> Tokenizer
-    Routes --> Trie
-    Tokenizer --> InvertedIndex
-    InvertedIndex --> BM25 & Cosine
-    BM25 & Cosine --> PhraseBooster
-    PhraseBooster -->|"Ranked JSON Results"| Routes
-
-    Routes --> Crawler
-    Crawler --> Robots
-    Crawler --> SSRFGuard
-    SSRFGuard -->|"Safe Public HTTP"| WebPages(("Public Web"))
-    Crawler -->|"Save JSON"| CorpusDir
-    CorpusDir -->|"Atomic Rebuild"| InvertedIndex
+```
+mini-search-engine/
+├── app.py                  # Flask application, REST API endpoints, and authentication routes
+├── search_engine.py        # Tokenizer, PrefixTrie, inverted index, BM25, and Cosine ranking engine
+├── crawler.py              # Polite web crawler with robots.txt compliance and SSRF validation
+├── models.py               # SQLAlchemy database models for User and SavedSearch
+├── forms.py                # Flask-WTF forms for user registration and login with CSRF protection
+├── requirements.txt        # Runtime application dependencies
+├── requirements-dev.txt    # Testing dependencies (pytest, pytest-cov, responses)
+├── pytest.ini              # Pytest configuration and test runner settings
+├── LICENSE                 # MIT License file
+├── .gitignore              # Files and patterns excluded from version control
+├── documents/              # Local text files making up the default search corpus
+├── crawled_pages/          # JSON files containing web pages crawled and indexed by the crawler
+├── templates/
+│   ├── index.html          # Main search engine interface and saved searches drawer
+│   ├── login.html          # User authentication sign-in page
+│   └── signup.html         # User registration page
+├── static/
+│   ├── style.css           # CSS styling, layout, theme tokens, and animations
+│   └── script.js           # Client-side search requests, autocomplete, and UI interactions
+└── tests/
+    ├── conftest.py         # Pytest fixtures for isolated corpus, test database, and Flask client
+    ├── test_api.py         # Integration tests for search endpoints, auth, and saved searches
+    ├── test_crawler.py     # Unit tests for SSRF defense, robots.txt, and HTML extraction
+    └── test_search_engine.py # Unit tests for tokenization, trie, index, and ranking formulas
 ```
 
-### Query Execution Lifecycle
-1. **Input Preprocessing:** The query string is tokenized, stripped of punctuation, converted to lowercase, and filtered for English stopwords.
-2. **Inverted Index Lookup:** The engine matches query terms against posting lists `word -> {doc_id: tf}` in $O(1)$ time per term.
-3. **Scoring:**
-   - **BM25:** Calculates term weights factoring in Robertson-Spärck Jones IDF, asymptotic saturation ($k_1=1.5$), and document length relative to average length (`avgdl`).
-   - **Cosine:** Calculates dot products over pre-normalized document vectors using sublinear term frequency.
-4. **Phrase Boosting:** Evaluates regex pattern matching for contiguous phrase sequences in raw document text, applying a $+30\%$ boost.
-5. **Filtering & Sorting:** Applies active source and score cutoff filters, sorting candidate matches in descending order.
+---
+
+## How It Works
+
+The search engine processes text through a four-stage pipeline:
+
+```
+Raw Text / Query ──► Tokenization ──► Inverted Index Lookup ──► BM25 / Cosine Scoring ──► Ranked Results
+```
+
+### 1. Tokenization and Preprocessing
+Raw text from documents and incoming search queries is converted into normalized tokens:
+- Converted to lowercase.
+- Punctuation and non-alphanumeric characters stripped (preserving alphanumeric terms and apostrophes).
+- Common English stopwords (such as "the", "is", "at") are removed using a curated stopword set.
+- Single-character noise tokens are discarded.
+
+### 2. Inverted Index Construction
+During startup, the engine reads all local `.txt` documents and crawled JSON files once. It compiles an inverted index—a dictionary where every unique word maps to a postings list:
+
+```
+"algorithm" ──► [ {doc_id: 1, tf: 3}, {doc_id: 4, tf: 1} ]
+"index"     ──► [ {doc_id: 1, tf: 5}, {doc_id: 2, tf: 2} ]
+```
+
+This structure eliminates full-text file scans during queries, reducing candidate document discovery to instant dictionary lookups.
+
+### 3. Relevance Scoring (BM25 & Cosine Similarity)
+When a search query is submitted:
+1. The query terms are preprocessed and looked up in the inverted index to retrieve matching candidate documents.
+2. The selected algorithm computes a numerical relevance score for each candidate:
+   - **BM25:** Evaluates term rarity across the corpus (Inverse Document Frequency), rewards documents containing matching terms while applying term saturation so excessive repetition does not skew results, and normalizes scores against document length compared to average corpus length.
+   - **Cosine Similarity:** Treats the query and documents as vectors of TF-IDF weights in multidimensional term space, measuring the cosine of the angle between them.
+3. If the query consists of multiple terms that appear adjacent in the original document text in the exact order queried, an exact phrase match bonus (+30%) is applied.
+
+### 4. Ranked Results Delivery
+Candidate documents are sorted in descending order by final score, filtered against any active source or score thresholds, paired with generated contextual text snippets highlighting matched terms, and returned as JSON to the interface.
 
 ---
 
-## How the Ranking Math Works
-
-### 1. Okapi BM25
-Okapi BM25 overcomes the weaknesses of classic TF-IDF:
-
-$$\text{score}(D, Q) = \sum_{t \in Q} \text{IDF}_{\text{BM25}}(t) \cdot \frac{tf(t, D) \cdot (k_1 + 1)}{tf(t, D) + k_1 \cdot \left(1 - b + b \cdot \frac{|D|}{\text{avgdl}}\right)}$$
-
-- **Term Saturation ($k_1 = 1.5$):** Diminishing returns on repeated terms. Even if a keyword appears 100 times, its score contribution asymptotically approaches an upper limit, preventing keyword stuffing.
-- **Document Length Normalization ($b = 0.75$):** Normalizes the document length $|D|$ against the average document length $\text{avgdl}$ of the entire corpus. Short documents with relevant matches are rewarded, while verbose documents containing incidental terms are dampened.
-- **Smooth RSJ IDF:** Guaranteed positive discrimination across all terms:
-  $$\text{IDF}_{\text{BM25}}(t) = \ln\left(\frac{N - \text{df}(t) + 0.5}{\text{df}(t) + 0.5} + 1.0\right)$$
-
-### 2. Vector Space Cosine Similarity
-Calculates the cosine of the angle between high-dimensional query and document vectors:
-
-$$\text{similarity}(\vec{q}, \vec{d}) = \frac{\vec{q} \cdot \vec{d}}{\|\vec{q}\| \|\vec{d}\|}$$
-
-- Uses sublinear term frequency ($1 + \ln(tf)$) and smoothed inverse document frequency.
-- Output is normalized strictly between $0.0$ and $1.0$.
-
-### Benchmark Comparison
-
-| Query | Document | Algorithm | Score | Phrase Match? | Behavioral Characteristics |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **`machine learning`** | *Machine Learning* | **BM25** | **5.2708** | Yes (+30%) | High saturation reward + phrase bonus |
-| | *Machine Learning* | **Cosine** | **0.3688** | Yes (+30%) | Normalized angular similarity |
-| | *Ai Basics* | **BM25** | **3.4231** | Yes (+30%) | Length normalization prevents verbosity bias |
-| **`climate change`** | *Climate Change* | **BM25** | **7.9665** | Yes (+30%) | Dedicated topic rewarded strongly |
-| | *Financial Markets* | **BM25** | **1.4867** | No | Incidental mention dampened by BM25 |
-
----
-
-## Quick Start & Setup
+## Setup & Running Locally
 
 ### 1. Prerequisites
 - Python 3.11 or 3.12
@@ -151,136 +116,47 @@ cd Mini-Search-Engine
 
 # Create and activate virtual environment
 python -m venv venv
+
 # Windows:
 venv\Scripts\activate
+
 # Linux/macOS:
 source venv/bin/activate
 
-# Install runtime dependencies
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 3. Run the Web Application
+### 3. Run the Application
 ```bash
 python app.py
 ```
-Open **`http://127.0.0.1:5000`** in your browser.  
-*(The SQLite database at `instance/app.db` and corpus directories are initialized automatically on startup).*
 
-### 4. Run Automated Tests & Code Coverage
+Open **`http://127.0.0.1:5000`** in your browser.
+
+> The SQLite database (`instance/app.db`) and necessary corpus directories are initialized automatically on startup.
+
+---
+
+## Running Tests
+
+Install test dependencies:
 ```bash
-# Install development and test dependencies
 pip install -r requirements-dev.txt
+```
 
-# Run all 58 automated tests
+Run all 58 automated tests:
+```bash
 pytest -v
+```
 
-# Run tests with code coverage breakdown
+Run tests with test coverage breakdown:
+```bash
 pytest --cov=. --cov-report=term-missing
-```
-
----
-
-## Deploy to Production (Render)
-
-This repository is pre-configured for instant zero-downtime deployment on **[Render](https://render.com)** (as well as Railway, Fly.io, or Heroku via WSGI standard `Procfile`).
-
-### Option A: 1-Click Render Blueprint (Recommended)
-1. Push or fork this repository to your GitHub account.
-2. Sign in to your [Render Dashboard](https://dashboard.render.com).
-3. Click **New +** > **Blueprint**.
-4. Connect your `Mini-Search-Engine` GitHub repository.
-5. Render detects [`render.yaml`](render.yaml), configures the Python 3.12 environment, installs dependencies, sets up the Gunicorn WSGI start command, wires the `/healthz` health check, and generates a cryptographically secure `SECRET_KEY`.
-6. Click **Apply** — your search engine will be live at an HTTPS URL (e.g. `https://mini-search-engine-xxxx.onrender.com`).
-
-### Option B: Manual Web Service Setup
-1. On the [Render Dashboard](https://dashboard.render.com), click **New +** > **Web Service**.
-2. Connect your GitHub repository.
-3. Configure the following service settings:
-   - **Runtime:** `Python`
-   - **Branch:** `main`
-   - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `gunicorn --workers 2 --threads 4 --timeout 120 --access-logfile - --error-logfile - app:app`
-   - **Health Check Path:** `/healthz`
-4. Under **Environment Variables**, configure:
-   | Variable | Recommended Value | Purpose |
-   | :--- | :--- | :--- |
-   | `FLASK_ENV` | `production` | Enables secure session cookies and production defaults |
-   | `FLASK_DEBUG` | `0` | Disables Flask debug mode and suppresses error traces |
-   | `PYTHON_VERSION` | `3.12.10` | Specifies Python 3.12 build image |
-   | `SECRET_KEY` | *(Click "Generate" or random 32-byte hex)* | Encrypts session cookies & CSRF tokens |
-5. Click **Create Web Service**.
-
-### Persistent Storage & Production Database Notes
-- **Default (SQLite):** Out of the box, user accounts and search history are stored in SQLite (`instance/app.db`), and corpus documents are indexed on startup. On Render's free tier, the container filesystem is ephemeral (resets on sleep/restart).
-- **Persistent Disk (Optional):** To retain newly crawled web pages and SQLite accounts across container restarts on Render, attach a Persistent Disk mounted at `/var/data` and set `DATA_DIR=/var/data`.
-- **Managed PostgreSQL (Optional):** For enterprise user persistence, create a Render PostgreSQL database, copy its **Internal Database URL**, and set `DATABASE_URL` in your web service. The app automatically converts legacy `postgres://` to `postgresql://` and boots tables on startup.
-
-### Verifying the Live Deployment
-Once deployed, verify your live search engine:
-1. Visit `https://<your-service>.onrender.com/healthz` — returns HTTP 200:
-   ```json
-   {"status": "healthy", "documents_indexed": 12, "environment": "production"}
-   ```
-2. Search a query (e.g. `"search engine inverted index"` with BM25).
-3. Register a user account, bookmark queries, and verify instant suggestions.
-
----
-
-## Design Decisions & Trade-Offs
-
-### 1. Why BM25/Cosine instead of SQL `LIKE '%query%'`?
-- **Relevance Ranking:** SQL `LIKE` performs a binary pattern match (a document matches or it doesn't). It has zero mathematical concept of term rarity (IDF), term frequency (TF), or document length normalization.
-- **Search Complexity:** SQL `LIKE` requires an $O(N)$ full table scan because leading wildcards invalidate B-tree indexes. An inverted index enables $O(1)$ dictionary term lookup and $O(\text{postings})$ candidate retrieval.
-
-### 2. Why SQLite instead of PostgreSQL for this project?
-- **Portability & Simplicity:** SQLite requires zero background services, no Docker containers, and stores state in a single file (`instance/app.db`). This makes the application entirely self-contained for local evaluation and continuous integration testing.
-- **Performance Profile:** For local personal search engines handling session management and tens of bookmarked queries per user, SQLite's in-process write-ahead logging (WAL) delivers microsecond read latencies without network overhead. Migrating to PostgreSQL requires updating only the `SQLALCHEMY_DATABASE_URI` configuration.
-
-### 3. How to Scale to Millions of Documents?
-If scaling this system to web-scale volumes, the following architectural upgrades would be required:
-1. **Disk-Backed Segmented Postings:** Replace in-memory Python dictionaries with immutable on-disk inverted index segments (SSTables with finite-state transducers for term dictionaries), periodically merging segments in the background (similar to Apache Lucene / Elasticsearch).
-2. **Distributed Index Sharding:** Partition documents across multiple worker nodes using document-ID hashing. A coordinator node scatters search queries to all shards in parallel and performs a $k$-way merge of the top scoring results.
-3. **Query Result & Term Caching:** Implement a distributed cache (e.g. Redis) to cache frequent query responses and hot term posting lists, bypassing disk I/O for repetitive traffic.
-4. **Asynchronous Distributed Crawler:** Separate crawling from the web process using an asynchronous task queue (e.g. Celery + Redis/RabbitMQ) with centralized domain-level rate limiting.
-
----
-
-## Repository Structure
-
-```
-mini-search-engine/
-├── app.py                      # Flask REST APIs, authentication controllers, error handling, health check
-├── search_engine.py            # Core IR: Tokenizer, PrefixTrie, inverted index, BM25 & Cosine
-├── crawler.py                  # Polite BFS web crawler: robots.txt compliance, SSRF defense
-├── models.py                   # SQLAlchemy database models: User and SavedSearch
-├── forms.py                    # Flask-WTF validation forms (CSRF, email, password length)
-├── requirements.txt            # Production runtime dependencies (Flask, Gunicorn, etc.)
-├── requirements-dev.txt        # Testing dependencies (pytest, pytest-cov, responses)
-├── Procfile                    # WSGI process definition for Render, Railway, Heroku
-├── render.yaml                 # Render Blueprint specification for infrastructure as code
-├── .env.example                # Documented template for production environment variables
-├── pytest.ini                  # Pytest configuration and pythonpath routing
-├── LICENSE                     # MIT License
-├── .gitignore                  # Git ignore rules for database, cache, and virtual environments
-├── .github/workflows/
-│   └── tests.yml               # GitHub Actions CI matrix workflow (Python 3.11 & 3.12)
-├── docs/
-│   ├── RESUME_BULLETS.md       # Tailored resume bullet points for engineering roles
-│   └── INTERVIEW_PREP.md       # Technical interview questions and model answers
-├── documents/                   # Local text corpus (sample notes and research articles)
-├── crawled_pages/              # Persisted JSON web documents extracted by crawler
-├── templates/
-│   ├── index.html              # Main glassmorphic search interface and saved search panel
-│   ├── login.html              # Glassmorphic user sign-in page
-│   └── signup.html             # Glassmorphic user registration page
-└── static/
-    ├── style.css               # Glass tokens, ambient mesh, animations, responsive design
-    └── script.js               # Search client, debounced autocomplete, saved searches logic
 ```
 
 ---
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE) — free for educational, commercial, and personal use.
+MIT License — see LICENSE file

@@ -269,7 +269,7 @@ def api_get_saved_searches():
     """Returns the current user's saved search queries, newest first."""
     searches = (
         SavedSearch.query.filter_by(user_id=current_user.id)
-        .order_by(SavedSearch.created_at.desc())
+        .order_by(SavedSearch.created_at.desc(), SavedSearch.id.desc())
         .limit(50)
         .all()
     )
