@@ -1,6 +1,6 @@
 /**
  * Mini Search Engine - Frontend Logic
- * Connects to Flask /api/search and /api/stats
+ * Connects to Flask /api/search, /api/stats, and /api/crawl
  */
 
 const form = document.getElementById("searchForm");
@@ -12,16 +12,29 @@ const toggleIndexBtn = document.getElementById("toggleIndex");
 const indexPanel = document.getElementById("indexPanel");
 const indexPanelBody = document.getElementById("indexPanelBody");
 const clearBtn = document.getElementById("clearBtn");
-const suggestionChips = document.querySelectorAll(".query-chip");
+const docCountBadge = document.getElementById("docCountBadge");
+
+// Crawler Elements
+const toggleCrawlerEl = document.getElementById("toggleCrawler");
+const crawlerToggleBtn = document.getElementById("crawlerToggleBtn");
+const crawlerBody = document.getElementById("crawlerBody");
+const crawlerForm = document.getElementById("crawlerForm");
+const seedUrlsInput = document.getElementById("seedUrlsInput");
+const maxPagesInput = document.getElementById("maxPagesInput");
+const maxDepthInput = document.getElementById("maxDepthInput");
+const crawlSubmitBtn = document.getElementById("crawlSubmitBtn");
+const crawlerStatus = document.getElementById("crawlerStatus");
 
 // Cache initial empty state HTML for restoration
 const initialEmptyStateHtml = emptyState ? emptyState.innerHTML : "";
 
 function escapeHtml(str) {
-  return str
+  if (!str) return "";
+  return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function highlightSnippet(snippet, queryWords) {
@@ -62,6 +75,10 @@ async function runSearch(query) {
     const res = await fetch(`/api/search?q=${encodeURIComponent(trimmed)}`);
     const data = await res.json();
 
+    if (data.total_indexed && docCountBadge) {
+      docCountBadge.textContent = data.total_indexed;
+    }
+
     if (data.count === 0) {
       metaLine.textContent = `no documents matched "${data.query}"`;
       if (emptyState) {
@@ -78,7 +95,7 @@ async function runSearch(query) {
           <h3 class="empty-title">No matching terms</h3>
           <p class="empty-desc">
             None of the indexed documents contain words from <strong>"${escapeHtml(data.query)}"</strong>.
-            Try broader terms, single concepts, or click one of the suggested topics above.
+            Try broader terms, single concepts, or crawl relevant web pages using the Live Web Crawler above.
           </p>
         `;
       }
@@ -99,14 +116,33 @@ async function runSearch(query) {
     data.results.forEach((r, i) => {
       const li = document.createElement("li");
       li.className = "result";
-      li.style.animationDelay = `${i * 60}ms`;
+      li.style.animationDelay = `${i * 50}ms`;
       const pct = Math.max(6, Math.round((r.score / maxScore) * 100));
+
+      const isWeb = r.source === "web";
+      const sourceBadgeHtml = isWeb
+        ? `<span class="source-tag source-web" title="Crawled from live web page">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            ${escapeHtml(r.domain || "Web Page")}
+          </span>`
+        : `<span class="source-tag source-file" title="Local document file">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            Local Doc
+          </span>`;
+
+      const titleHtml = isWeb && r.url
+        ? `<a href="${escapeHtml(r.url)}" target="_blank" rel="noopener noreferrer" class="result-link" title="Open ${escapeHtml(r.url)} in new tab">
+            ${escapeHtml(r.title || r.filename)}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+          </a>`
+        : escapeHtml(r.title || r.filename);
 
       li.innerHTML = `
         <div class="result-head">
           <div class="result-title-group">
             <span class="result-rank">#${i + 1}</span>
-            <span class="result-title">${escapeHtml(r.filename)}</span>
+            ${sourceBadgeHtml}
+            <span class="result-title">${titleHtml}</span>
           </div>
           <span class="result-score">
             <span class="score-label">similarity</span>
@@ -164,7 +200,113 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// ------------------------------------------------------------------
+// Web Crawler UI Controls
+// ------------------------------------------------------------------
+function toggleCrawler() {
+  const isHidden = crawlerBody.classList.contains("hidden");
+  crawlerBody.classList.toggle("hidden");
+  crawlerToggleBtn.classList.toggle("expanded", isHidden);
+  const btnText = crawlerToggleBtn.querySelector(".btn-text");
+  if (btnText) {
+    btnText.textContent = isHidden ? "Close Crawler" : "Open Crawler";
+  }
+  crawlerToggleBtn.setAttribute("aria-expanded", isHidden ? "true" : "false");
+}
+
+if (toggleCrawlerEl) {
+  toggleCrawlerEl.addEventListener("click", (e) => {
+    // Avoid double toggle if user clicks the button directly
+    if (e.target.closest("#crawlerToggleBtn") && e.currentTarget !== e.target) return;
+    toggleCrawler();
+  });
+}
+if (crawlerToggleBtn) {
+  crawlerToggleBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleCrawler();
+  });
+}
+
+if (crawlerForm) {
+  crawlerForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const rawSeeds = seedUrlsInput.value.trim();
+    if (!rawSeeds) return;
+
+    const seed_urls = rawSeeds.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    const max_pages = parseInt(maxPagesInput.value, 10) || 5;
+    const max_depth = parseInt(maxDepthInput.value, 10) || 1;
+
+    // Loading State
+    crawlSubmitBtn.disabled = true;
+    crawlSubmitBtn.innerHTML = `<span class="spinner"></span> <span>Crawling...</span>`;
+    crawlerStatus.className = "crawler-status status-loading";
+    crawlerStatus.classList.remove("hidden");
+    crawlerStatus.innerHTML = `
+      <span class="spinner"></span>
+      <span>Checking robots.txt and crawling up to <strong>${max_pages}</strong> page(s)...</span>
+    `;
+
+    try {
+      const res = await fetch("/api/crawl", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seed_urls, max_pages, max_depth }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        crawlerStatus.className = "crawler-status status-success";
+        let summaryHtml = `
+          <div>
+            <strong>Crawl Complete!</strong> Successfully indexed <strong>${data.pages_crawled}</strong> page(s)
+            (${data.pages_skipped} skipped/disallowed). Total index now contains <strong>${data.total_documents}</strong> documents.
+          </div>
+        `;
+        if (data.crawled_pages && data.crawled_pages.length > 0) {
+          summaryHtml += `<ul class="crawled-summary-list">`;
+          data.crawled_pages.forEach((p) => {
+            summaryHtml += `<li><strong>${escapeHtml(p.title)}</strong> &mdash; <a href="${escapeHtml(p.url)}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline;">${escapeHtml(p.url)}</a></li>`;
+          });
+          summaryHtml += `</ul>`;
+        }
+        crawlerStatus.innerHTML = summaryHtml;
+
+        // Update badge
+        if (docCountBadge) docCountBadge.textContent = data.total_documents;
+
+        // Invalidate cached stats
+        if (indexPanelBody) delete indexPanelBody.dataset.loaded;
+
+        // Re-run existing query if present to immediately show new results
+        const currentQ = input.value.trim();
+        if (currentQ) runSearch(currentQ);
+      } else {
+        crawlerStatus.className = "crawler-status status-error";
+        crawlerStatus.textContent = `Crawl failed: ${data.error || "Unknown error"}`;
+      }
+    } catch (err) {
+      crawlerStatus.className = "crawler-status status-error";
+      crawlerStatus.textContent = `Crawl request failed: ${err.message}`;
+      console.error("Crawl error:", err);
+    } finally {
+      crawlSubmitBtn.disabled = false;
+      crawlSubmitBtn.innerHTML = `
+        <span class="btn-text">Crawl &amp; Index</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="13 17 18 12 13 7"></polyline>
+          <polyline points="6 17 11 12 6 7"></polyline>
+        </svg>
+      `;
+    }
+  });
+}
+
+// ------------------------------------------------------------------
 // Toggle Index Stats Panel
+// ------------------------------------------------------------------
 toggleIndexBtn.addEventListener("click", async () => {
   const isHidden = indexPanel.classList.contains("hidden");
   indexPanel.classList.toggle("hidden");
@@ -185,19 +327,30 @@ toggleIndexBtn.addEventListener("click", async () => {
     try {
       const res = await fetch("/api/stats");
       const stats = await res.json();
+      const localCount = stats.num_local_documents || stats.num_documents;
+      const webCount = stats.num_web_documents || 0;
+
       indexPanelBody.innerHTML = `
         <div class="stats-header">
           <div class="stat-card">
             <span class="stat-number">${stats.num_documents}</span>
-            <span class="stat-caption">Indexed Documents</span>
+            <span class="stat-caption">Total Documents</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-number">${localCount}</span>
+            <span class="stat-caption">Local Files</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-number">${webCount}</span>
+            <span class="stat-caption">Crawled Web Pages</span>
           </div>
           <div class="stat-card">
             <span class="stat-number">${stats.num_unique_terms}</span>
-            <span class="stat-caption">Vocabulary Terms</span>
+            <span class="stat-caption">Unique Terms</span>
           </div>
         </div>
         <div class="stats-section">
-          <div class="stats-section-title">Indexed Corpus Files</div>
+          <div class="stats-section-title">Corpus Documents (${stats.num_documents})</div>
           <div class="doc-list">
             ${stats.documents.map((d) => `
               <span class="doc-badge">
@@ -211,11 +364,11 @@ toggleIndexBtn.addEventListener("click", async () => {
           </div>
         </div>
         <div class="stats-algorithm">
-          <div class="stats-section-title">TF-IDF Vector Space Architecture</div>
-          <p><strong>1. Tokenization & Filtering:</strong> Lowercases text, cleans punctuation, strips standard English stopwords.</p>
-          <p><strong>2. Inverted Index:</strong> Maps each unique word to its posting list of <code>{doc_id: term_frequency}</code>.</p>
-          <p><strong>3. TF&#8209;IDF Dampened Weighting:</strong> Computes <code>tf = 1 + ln(count)</code> and <code>idf = ln((1+N)/(1+df)) + 1</code>.</p>
-          <p><strong>4. Cosine Similarity Ranking:</strong> Computes the dot product between the normalized query vector and document vectors: <code>sim(q, d) = (q &middot; d) / (||q|| &times; ||d||)</code>.</p>
+          <div class="stats-section-title">TF-IDF &amp; Crawler Architecture</div>
+          <p><strong>1. Web Crawler:</strong> Breadth-first crawl respecting <code>robots.txt</code> via <code>urllib.robotparser</code>, stripping HTML boilerplate and extracting text.</p>
+          <p><strong>2. Inverted Index:</strong> Maps each unique word to a posting list of <code>{document_id: term_frequency}</code> across both local notes and web pages.</p>
+          <p><strong>3. Dampened TF-IDF:</strong> Weights balance occurrence with rarity: <code>weight = (1 + ln(tf)) &times; (ln((1+N)/(1+df)) + 1)</code>.</p>
+          <p><strong>4. Cosine Similarity Ranking:</strong> Measures the normalized angle between the query vector and candidate document vectors: <code>sim(q, d) = (q &middot; d) / (||q|| &times; ||d||)</code>.</p>
         </div>
       `;
       indexPanelBody.dataset.loaded = "true";

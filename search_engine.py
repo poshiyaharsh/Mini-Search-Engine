@@ -3,9 +3,10 @@ Mini Search Engine - Core Logic
 =================================
 Implements:
   1. Text preprocessing (tokenization, stopword removal)
-  2. An inverted index (word -> which documents contain it, and how often)
-  3. TF-IDF weighting (how important a word is to a document, relative to the corpus)
-  4. Cosine similarity ranking (compares the query vector to each document vector)
+  2. Multi-source document ingestion (local .txt files + crawled web pages JSON/dicts)
+  3. An inverted index (word -> which documents contain it, and how often)
+  4. TF-IDF weighting (how important a word is to a document, relative to the corpus)
+  5. Cosine similarity ranking (compares the query vector to each document vector)
 
 This is deliberately written without any external NLP/search libraries so every
 step of "how Google-style search actually works" is visible and hackable.
@@ -14,6 +15,7 @@ step of "how Google-style search actually works" is visible and hackable.
 import os
 import re
 import math
+import json
 from collections import defaultdict, Counter
 
 # A small, hand-picked stopword list. Stopwords are common words ("the", "is",
@@ -31,16 +33,26 @@ TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9']+")
 
 def tokenize(text: str):
     """Lowercase, strip punctuation, split into words, drop stopwords/short tokens."""
+    if not text:
+        return []
     text = text.lower()
     tokens = TOKEN_PATTERN.findall(text)
     return [t for t in tokens if t not in STOPWORDS and len(t) > 1]
 
 
 class SearchEngine:
-    def __init__(self, doc_dir: str):
+    def __init__(
+        self,
+        doc_dir: str | None = None,
+        crawled_dir: str | None = None,
+        extra_docs: list[dict] | None = None,
+    ):
         self.doc_dir = doc_dir
+        self.crawled_dir = crawled_dir
+
         self.documents = {}        # doc_id -> raw text
-        self.doc_names = {}        # doc_id -> filename
+        self.doc_meta = {}         # doc_id -> metadata dict (title, filename, url, source, domain)
+        self.doc_names = {}        # doc_id -> display label (for backward compatibility)
         self.tokenized_docs = {}   # doc_id -> list of tokens
         self.inverted_index = defaultdict(dict)  # term -> {doc_id: term_frequency}
         self.doc_freq = {}         # term -> number of documents containing it
@@ -49,23 +61,104 @@ class SearchEngine:
         self.doc_norms = {}        # doc_id -> vector length (for cosine similarity)
         self.N = 0                 # total number of documents
 
-        self._load_documents()
+        self.reindex(extra_docs=extra_docs)
+
+    # ------------------------------------------------------------------
+    # STEP 1: Ingest documents from multiple sources & reindex
+    # ------------------------------------------------------------------
+    def reindex(self, extra_docs: list[dict] | None = None):
+        """Clears and rebuilds the inverted index and TF-IDF models from all sources."""
+        self.documents.clear()
+        self.doc_meta.clear()
+        self.doc_names.clear()
+        self.tokenized_docs.clear()
+        self.inverted_index.clear()
+        self.doc_freq.clear()
+        self.idf.clear()
+        self.doc_vectors.clear()
+        self.doc_norms.clear()
+
+        doc_id = 0
+
+        # Source A: Local .txt files
+        if self.doc_dir and os.path.isdir(self.doc_dir):
+            files = sorted(f for f in os.listdir(self.doc_dir) if f.endswith(".txt"))
+            for fname in files:
+                path = os.path.join(self.doc_dir, fname)
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        text = f.read()
+                    self.documents[doc_id] = text
+                    self.doc_names[doc_id] = fname
+                    self.doc_meta[doc_id] = {
+                        "filename": fname,
+                        "title": fname.replace(".txt", "").replace("_", " ").title(),
+                        "url": None,
+                        "source": "file",
+                        "domain": "local",
+                    }
+                    self.tokenized_docs[doc_id] = tokenize(text)
+                    doc_id += 1
+                except Exception as e:
+                    print(f"Warning: Failed to read local doc {fname}: {e}")
+
+        # Source B: Crawled web pages from crawled_dir
+        if self.crawled_dir and os.path.isdir(self.crawled_dir):
+            json_files = sorted(f for f in os.listdir(self.crawled_dir) if f.endswith(".json"))
+            for jname in json_files:
+                jpath = os.path.join(self.crawled_dir, jname)
+                try:
+                    with open(jpath, "r", encoding="utf-8") as f:
+                        page = json.load(f)
+                    url = page.get("url", "")
+                    title = page.get("title") or url
+                    text = page.get("text", "")
+                    domain = page.get("domain", "")
+
+                    if text.strip():
+                        self.documents[doc_id] = text
+                        self.doc_names[doc_id] = title
+                        self.doc_meta[doc_id] = {
+                            "filename": title,
+                            "title": title,
+                            "url": url,
+                            "source": "web",
+                            "domain": domain,
+                            "crawled_at": page.get("crawled_at"),
+                        }
+                        self.tokenized_docs[doc_id] = tokenize(text)
+                        doc_id += 1
+                except Exception as e:
+                    print(f"Warning: Failed to read crawled page {jname}: {e}")
+
+        # Source C: In-memory document dicts
+        if extra_docs:
+            for doc in extra_docs:
+                url = doc.get("url")
+                title = doc.get("title") or doc.get("filename") or (url or f"doc_{doc_id}")
+                text = doc.get("text", "")
+                if text.strip():
+                    self.documents[doc_id] = text
+                    self.doc_names[doc_id] = title
+                    self.doc_meta[doc_id] = {
+                        "filename": doc.get("filename") or title,
+                        "title": title,
+                        "url": url,
+                        "source": doc.get("source", "web" if url else "file"),
+                        "domain": doc.get("domain", ""),
+                    }
+                    self.tokenized_docs[doc_id] = tokenize(text)
+                    doc_id += 1
+
+        self.N = len(self.documents)
         self._build_inverted_index()
         self._compute_tfidf()
 
-    # ------------------------------------------------------------------
-    # STEP 1: Load and tokenize the corpus
-    # ------------------------------------------------------------------
-    def _load_documents(self):
-        files = sorted(f for f in os.listdir(self.doc_dir) if f.endswith(".txt"))
-        for doc_id, fname in enumerate(files):
-            path = os.path.join(self.doc_dir, fname)
-            with open(path, "r", encoding="utf-8") as f:
-                text = f.read()
-            self.documents[doc_id] = text
-            self.doc_names[doc_id] = fname
-            self.tokenized_docs[doc_id] = tokenize(text)
-        self.N = len(self.documents)
+    def add_documents(self, new_docs: list[dict]):
+        """Ingests additional documents into the corpus and refreshes the index."""
+        if not new_docs:
+            return
+        self.reindex(extra_docs=new_docs)
 
     # ------------------------------------------------------------------
     # STEP 2: Build the inverted index
@@ -87,6 +180,9 @@ class SearchEngine:
     #   weight = tf * idf
     # ------------------------------------------------------------------
     def _compute_tfidf(self):
+        if self.N == 0:
+            return
+
         for term, df in self.doc_freq.items():
             self.idf[term] = math.log((1 + self.N) / (1 + df)) + 1
 
@@ -109,7 +205,7 @@ class SearchEngine:
     # ------------------------------------------------------------------
     def search(self, query: str, top_k: int = 10):
         q_tokens = tokenize(query)
-        if not q_tokens:
+        if not q_tokens or self.N == 0:
             return []
 
         q_counts = Counter(q_tokens)
@@ -125,8 +221,6 @@ class SearchEngine:
         q_norm = math.sqrt(sum(w * w for w in q_vector.values())) or 1e-9
 
         # Only score documents that actually contain at least one query term
-        # (this is exactly why the inverted index exists - it lets us avoid
-        # scanning every document for every query).
         candidate_docs = set()
         for term in q_vector:
             candidate_docs.update(self.inverted_index.get(term, {}).keys())
@@ -143,9 +237,14 @@ class SearchEngine:
 
         results = []
         for doc_id, score in scored[:top_k]:
+            meta = self.doc_meta.get(doc_id, {})
             results.append({
                 "doc_id": doc_id,
                 "filename": self.doc_names[doc_id],
+                "title": meta.get("title", self.doc_names[doc_id]),
+                "url": meta.get("url"),
+                "source": meta.get("source", "file"),
+                "domain": meta.get("domain"),
                 "score": round(score, 4),
                 "snippet": self._make_snippet(doc_id, set(q_tokens)),
             })
@@ -155,23 +254,33 @@ class SearchEngine:
     # Helper: build a short preview around the first matching query word
     # ------------------------------------------------------------------
     def _make_snippet(self, doc_id: int, q_tokens: set, window: int = 14):
-        words = self.documents[doc_id].split()
-        lowered = [w.lower().strip(".,!?;:\"'()") for w in words]
+        raw = self.documents.get(doc_id, "")
+        words = raw.split()
+        lowered = [w.lower().strip(".,!?;:\"'()[]{}") for w in words]
         for i, w in enumerate(lowered):
             if w in q_tokens:
                 start = max(0, i - window // 2)
                 end = min(len(words), i + window // 2)
-                return " ".join(words[start:end]) + " ..."
-        return " ".join(words[:window]) + " ..."
+                prefix = "... " if start > 0 else ""
+                suffix = " ..." if end < len(words) else ""
+                return prefix + " ".join(words[start:end]) + suffix
+        return " ".join(words[:window]) + (" ..." if len(words) > window else "")
 
     # ------------------------------------------------------------------
-    # Introspection helpers, handy for a "how does this work" debug view
+    # Introspection helpers, handy for index stats dashboard
     # ------------------------------------------------------------------
     def stats(self):
+        local_docs = [m["filename"] for m in self.doc_meta.values() if m.get("source") == "file"]
+        web_docs = [m["title"] for m in self.doc_meta.values() if m.get("source") == "web"]
+
         return {
             "num_documents": self.N,
+            "num_local_documents": len(local_docs),
+            "num_web_documents": len(web_docs),
             "num_unique_terms": len(self.inverted_index),
-            "documents": [self.doc_names[i] for i in range(self.N)],
+            "documents": [self.doc_meta[i]["title"] for i in range(self.N)],
+            "local_documents": local_docs,
+            "web_documents": web_docs,
         }
 
     def posting_list(self, term: str):
@@ -186,14 +295,16 @@ class SearchEngine:
 
 
 if __name__ == "__main__":
-    # Quick manual test from the command line:
-    #   python search_engine.py "machine learning ranking"
     import sys
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    engine = SearchEngine(os.path.join(base_dir, "documents"))
-    query = " ".join(sys.argv[1:]) or "machine learning search ranking"
+    doc_dir = os.path.join(base_dir, "documents")
+    crawled_dir = os.path.join(base_dir, "crawled_pages")
+    engine = SearchEngine(doc_dir=doc_dir, crawled_dir=crawled_dir)
+    query = " ".join(sys.argv[1:]) or "machine learning ranking"
     print(f"\nQuery: {query!r}")
     print(f"Indexed {engine.N} documents, {len(engine.inverted_index)} unique terms\n")
     for rank, r in enumerate(engine.search(query), start=1):
-        print(f"{rank}. {r['filename']}  (score={r['score']})")
-        print(f"   ...{r['snippet']}\n")
+        print(f"{rank}. [{r['source'].upper()}] {r['title']} (score={r['score']})")
+        if r.get("url"):
+            print(f"    URL: {r['url']}")
+        print(f"    ...{r['snippet']}\n")
