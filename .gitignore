@@ -1,7 +1,11 @@
-# Python bytecode
+# Python bytecode & cache
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+build/
+dist/
+*.egg-info/
 
 # Environments & secrets
 .env
@@ -40,3 +44,5 @@ instance/
 htmlcov/
 coverage.xml
 
+# Node (if used)
+node_modules/
