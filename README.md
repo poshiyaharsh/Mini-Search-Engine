@@ -1,9 +1,9 @@
 # Mini Search Engine + Web Crawler
 
-A from-scratch implementation of the core ideas behind Google-style search engines:
-**breadth-first web crawling (respecting robots.txt) → tokenization → inverted index → TF-IDF weighting → cosine similarity ranking**, served through a Flask API with a modern glassmorphism frontend.
+A from-scratch implementation of the core ideas behind modern search engines:
+**breadth-first web crawling (respecting robots.txt) → tokenization → inverted index → Okapi BM25 ranking (with term saturation, document length normalization, and phrase boosting) → vector space cosine TF-IDF → Prefix Trie autocomplete → multi-source filters**, served through a hardened Flask API with a modern glassmorphism frontend.
 
-No external search library (like Lucene, Elasticsearch, or Whoosh) is used anywhere. Every step is written in plain Python so you can inspect how queries turn into a ranked list of documents and web pages.
+No external search library (like Lucene, Elasticsearch, or Whoosh) is used anywhere. Every algorithm and data structure is implemented directly in plain Python.
 
 ---
 
@@ -11,20 +11,20 @@ No external search library (like Lucene, Elasticsearch, or Whoosh) is used anywh
 
 ```
 mini-search-engine/
-├── app.py                  # Flask app: frontend routes, search API & crawl endpoint
-├── search_engine.py        # Core IR: multi-source ingestion, inverted index, TF-IDF, cosine ranking
-├── crawler.py              # Web crawler: BFS queue, robots.txt compliance, HTML parser
-├── requirements.txt        # Flask, requests, beautifulsoup4, lxml
+├── app.py                  # Flask app: frontend routes, search, suggest, and crawl endpoints
+├── search_engine.py        # Core IR: Prefix Trie, BM25 ranking, cosine similarity, filters
+├── crawler.py              # Web crawler: BFS queue, robots.txt compliance, HTML parser, SSRF defense
+├── requirements.txt        # Flask, requests, beautifulsoup4, lxml, urllib3, werkzeug
 ├── documents/               # Local corpus: 10 sample notes/articles (.txt)
 │   ├── ai_basics.txt
 │   ├── python_programming.txt
 │   └── ... (8 more)
 ├── crawled_pages/          # Persisted crawled web pages (saved as JSON)
 ├── templates/
-│   └── index.html          # Modern glassmorphism search & crawler UI
+│   └── index.html          # Glassmorphic search UI with live filter bar and crawler modal
 └── static/
-    ├── style.css           # Glassmorphic surfaces, animated mesh background, typography
-    └── script.js           # Search API client, crawler triggers, interactive stats
+    ├── style.css           # Glass tokens, animated ambient mesh, dropdown, and filter styles
+    └── script.js           # Search client, debounced autocomplete, keyboard nav, crawler controls
 ```
 
 ---
@@ -34,35 +34,79 @@ mini-search-engine/
 ### 1. Web Crawler (`crawler.py`)
 Rather than relying on third-party search APIs, the engine crawls live web pages itself:
 - **Breadth-First Traversal (BFS):** Uses a FIFO queue (`collections.deque`) seeded with starting URLs, traversing out to a configurable `max_depth` and `max_pages`.
-- **`robots.txt` Compliance:** Before making a request to any domain, the crawler checks `urllib.robotparser.RobotFileParser` to verify whether `MiniSearchEngineBot` is allowed to fetch the URL. If disallowed, the page is skipped.
-- **Politeness & Rate Limiting:** Implements a mandatory 1.0–2.0 second delay between consecutive requests to the same domain, with a descriptive `User-Agent` header.
-- **Domain Scoping:** Automatically restricts crawling to the seed domains by default, preventing the crawler from wandering uncontrollably across external sites.
-- **Content Cleaning:** Strips boilerplates (`<script>`, `<style>`, `<nav>`, `<footer>`, `<header>`, `<aside>`, `<svg>`), extracts clean page titles, visible text, and discovers outbound links (`<a href="...">`).
-- **Persistence:** Saves crawled pages to `crawled_pages/{url_hash}.json`, allowing newly indexed sites to persist across server restarts.
+- **`robots.txt` Compliance:** Before making a request to any domain, the crawler verifies `urllib.robotparser.RobotFileParser` to confirm `MiniSearchEngineBot` is allowed to fetch the URL.
+- **Politeness & Rate Limiting:** Enforces a mandatory 1.0–2.0 second delay between consecutive requests to the same domain.
+- **SSRF & Security Defense:** Pre-screens seed URLs and DNS resolutions against private IPv4/IPv6 ranges (e.g. `127.0.0.1`, `10.0.0.0/8`, `192.168.0.0/16`, AWS metadata `169.254.169.254`).
+- **Content Cleaning & Persistence:** Strips boilerplate elements (`<script>`, `<style>`, `<nav>`, etc.), extracts page text, and persists crawled documents as JSON files in `crawled_pages/`.
 
-### 2. Multi-Source Ingestion & Tokenization (`search_engine.py`)
-The `SearchEngine` class ingests documents from multiple sources without duplicating IR math:
-- Local `.txt` files in `documents/` (tagged as `Local Doc`).
-- Crawled web pages in `crawled_pages/` (tagged as `Web Page` with clickable URLs).
-- In-memory document payloads.
+### 2. Multi-Source Ingestion & Inverted Index (`search_engine.py`)
+- Documents are ingested from local files (`documents/`) and crawled web pages (`crawled_pages/`), tagging each with a unified `source` (`local` vs `web`).
+- The engine tokenizes, strips punctuation, removes stopwords, and builds an in-memory inverted index:
+  $$\text{word} \to \{\text{doc\_id}: \text{term\_frequency}\}$$
 
-Each document is tokenized, lowercased, stripped of punctuation, and filtered through a stopword list (`the`, `is`, `and`, ...) so common filler words do not distort relevance.
+---
 
-### 3. Inverted Index
-Instead of storing "document → words", the engine maintains an inverted index:
-`word → {doc_id: term_frequency}`.
-When a query arrives, only candidate documents containing at least one query term are inspected, avoiding exhaustive corpus scans.
+## Ranking Algorithms: BM25 vs. Cosine TF-IDF
 
-### 4. TF-IDF Weighting
-Each word in each document is assigned a weight:
-- **Term Frequency ($TF$):** Sub-linear log-dampened: `1 + ln(count)` so a term appearing 50 times does not overpower a term appearing once.
-- **Inverse Document Frequency ($IDF$):** Smooth corpus discrimination: `ln((1 + N) / (1 + df)) + 1`. Rare terms across the corpus receive higher discriminative weight.
-- **Weight:** $w = TF \times IDF$.
+The engine defaults to **Okapi BM25** while retaining **Vector Space Cosine TF-IDF** as a selectable comparative algorithm.
 
-### 5. Cosine Similarity Ranking
-The search query is tokenized and transformed into a TF-IDF vector in the same vocabulary space as the corpus. The relevance score is the **cosine similarity** between the query vector and candidate document vectors:
-$$\text{similarity}(\vec{q}, \vec{d}) = \frac{\vec{q} \cdot \vec{d}}{\|\vec{q}\| \|\vec{d}\|}$$
-Documents with the smallest angular distance (highest cosine score) rank first.
+### Okapi BM25 (Default)
+BM25 refines classic TF-IDF by introducing **term saturation** and **document length normalization**:
+
+$$\text{score}(D, Q) = \sum_{t \in Q} \text{IDF}_{\text{BM25}}(t) \cdot \frac{tf(t, D) \cdot (k_1 + 1)}{tf(t, D) + k_1 \cdot \left(1 - b + b \cdot \frac{|D|}{\text{avgdl}}\right)}$$
+
+- **Term Saturation ($k_1 = 1.5$):** Limits the benefit of repeated terms. As $tf$ grows, the term weight asymptotically approaches $(k_1 + 1)$, preventing keyword-stuffed documents from dominating.
+- **Document Length Normalization ($b = 0.75$):** Normalizes the document length $|D|$ against the average corpus document length $\text{avgdl}$. Short documents with relevant term occurrences are not penalized in favor of lengthy documents that happen to contain the word purely due to verbosity.
+- **Robertson-Spärck Jones IDF:** Smooth corpus discrimination guaranteeing positive values:
+  $$\text{IDF}_{\text{BM25}}(t) = \ln\left(\frac{N - \text{df}(t) + 0.5}{\text{df}(t) + 0.5} + 1.0\right)$$
+- **Exact Phrase Match Boosting:** If a multi-word query (e.g. `"machine learning"`) appears as an exact contiguous phrase inside the document, its final relevance score is multiplied by **$1.3\times$ (+30% boost)**.
+
+### Cosine TF-IDF (Comparative)
+- Uses sublinear term frequency ($1 + \ln(tf)$) and smoothed corpus IDF ($\ln((1 + N)/(1 + df)) + 1$).
+- Calculates the cosine of the angle between query and document vectors:
+  $$\text{similarity}(\vec{q}, \vec{d}) = \frac{\vec{q} \cdot \vec{d}}{\|\vec{q}\| \|\vec{d}\|}$$
+- Always normalized between $0.0$ and $1.0$.
+
+---
+
+## Autocomplete & Query Suggestions
+
+As the user types into the search bar, the frontend debounces input by 250ms and queries `/api/suggest?prefix=<term>`:
+- **Prefix Trie Structure:** Built during corpus indexing in $O(V \cdot L)$ time.
+- **Prefix Search:** Traverses the trie to the prefix node in $O(L)$ time, then gathers matching completions via depth-first traversal.
+- **Ranking by Document Frequency:** Completions are ordered descending by how many documents in the index contain the word (`df`), so widely used terms appear first.
+- **Keyboard Navigation:** Users can navigate suggestions with `ArrowDown` / `ArrowUp`, select with `Enter`, and dismiss with `Escape` or clicking outside.
+
+---
+
+## Multi-Dimensional Filters
+
+Users can narrow and compare search results dynamically without reloading the page:
+1. **Algorithm Switch:** Toggle between **BM25** and **Cosine TF-IDF**.
+2. **Source Filter:**
+   - `All`: Search across both local `.txt` documents and crawled web pages.
+   - `Local Docs`: Restrict search exclusively to notes in `documents/`.
+   - `Crawled Web`: Restrict search exclusively to crawled web documents.
+3. **Minimum Score Cutoff:** Filter out low-relevance noise (`Any`, `> 0.05`, `> 0.10`, `> 0.25`, `> 0.50`).
+
+---
+
+## Score Comparison: BM25 vs. Cosine TF-IDF
+
+Below is an actual benchmark comparison of top documents across 3 sample queries:
+
+| Query | Document | Algorithm | Score | Phrase Match? | Key Behavior |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`machine learning`** | *Machine Learning* | **BM25** | **5.2708** | Yes (+30%) | High saturation reward + phrase match |
+| | *Machine Learning* | **Cosine** | **0.3688** | Yes (+30%) | Normalized angular similarity |
+| | *Ai Basics* | **BM25** | **3.4231** | Yes (+30%) | High relevance, normalized for doc length |
+| | *Ai Basics* | **Cosine** | **0.1955** | Yes (+30%) | Angular match |
+| **`climate change`** | *Climate Change* | **BM25** | **7.9665** | Yes (+30%) | Focused document strongly rewarded |
+| | *Climate Change* | **Cosine** | **0.3970** | Yes (+30%) | Normalized angle |
+| | *Financial Markets* | **BM25** | **1.4867** | No | Incidental mention dampened by BM25 |
+| | *Financial Markets* | **Cosine** | **0.0551** | No | Low angle match |
+| **`space exploration`** | *Space Exploration* | **BM25** | **8.7311** | Yes (+30%) | Strong exact match with length penalty control |
+| | *Space Exploration* | **Cosine** | **0.3882** | Yes (+30%) | Clean angle separation |
 
 ---
 
@@ -81,42 +125,34 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Then open **http://127.0.0.1:5000** in your browser.
-
-### 3. Search & Crawl from the UI
-- **Search:** Enter search queries in the search bar (e.g. `machine learning ranking`, `climate change energy`, `space exploration`).
-- **Crawl & Index:** Click **"Open Crawler"**, paste in seed URLs (e.g. `https://en.wikipedia.org/wiki/Information_retrieval` or `https://docs.python.org/3/tutorial/`), select max pages, and click **"Crawl & Index"**.
-- Results will display with dynamic source tags (`[Local Doc]` vs `[Web Page]`) and clickable links for web pages.
-
----
-
-## Command-Line Usage
-
-You can also run search and crawling directly from your terminal:
-
-```bash
-# Test the search ranking logic on local + crawled corpus:
-python search_engine.py "space exploration mars"
-
-# Run a standalone crawl test:
-python crawler.py "https://en.wikipedia.org/wiki/Search_engine"
-```
+Open **http://127.0.0.1:5000** in your browser.
 
 ---
 
 ## API Endpoints
 
-- `GET /api/search?q=<query>` — Returns ranked JSON results with TF-IDF similarity scores, source metadata, URLs, and snippets.
-- `POST /api/crawl` — Accepts `{"seed_urls": ["..."], "max_pages": 10, "max_depth": 2}`, runs a polite crawl, saves to `crawled_pages/`, and rebuilds the index.
-- `GET /api/stats` — Returns index stats: total documents, local document count, crawled web page count, vocabulary size, and document lists.
-- `GET /api/term/<word>` — Inspects the raw posting list and IDF for a specific term (e.g. `/api/term/vector`).
+- `GET /api/search?q=<query>&algo=<bm25|cosine>&source=<all|local|web>&min_score=<float>`
+  - Returns ranked JSON results with scores, snippet highlights, phrase match flags, and applied filter metadata.
+- `GET /api/suggest?prefix=<term>&limit=8`
+  - Returns top vocabulary completions ranked by document frequency.
+- `POST /api/crawl`
+  - Accepts `{"seed_urls": ["..."], "max_pages": 5, "max_depth": 1}`, crawls matching domains safely, persists to `crawled_pages/`, and rebuilds the index.
+- `GET /api/stats`
+  - Returns total documents, local documents, crawled web pages, unique terms, and average document length (`avgdl`).
+- `GET /api/term/<word>`
+  - Inspects the raw posting list and IDF for a specific vocabulary word.
 
 ---
 
-## Crawler Scope & Ethical Guidelines
+## Command-Line Usage
 
-> [!IMPORTANT]
-> - **Educational Scope:** This crawler is designed as a lightweight educational component for demonstrating information retrieval fundamentals. It is single-threaded and intended for small, controlled crawls (1–25 pages), not web-scale indexing.
-> - **Respect `robots.txt`:** The crawler strictly obeys domain `robots.txt` disallow rules via Python's standard `urllib.robotparser`.
-> - **Polite Rate Limiting:** An intentional 1.0–2.0 second delay is enforced between requests to the same domain.
-> - **Permitted Targets:** Only crawl websites that explicitly allow web scrapers/crawlers or sites you own (e.g., Wikipedia, documentation hubs, personal blogs). Do not attempt to crawl search engine result pages or sites that prohibit automated crawling in their Terms of Service.
+```bash
+# Test BM25 search ranking:
+python search_engine.py "machine learning" bm25
+
+# Test Cosine similarity search ranking:
+python search_engine.py "machine learning" cosine
+
+# Run a standalone crawl test:
+python crawler.py "https://en.wikipedia.org/wiki/Search_engine"
+```

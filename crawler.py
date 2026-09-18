@@ -387,8 +387,15 @@ class WebCrawler:
                     skipped_count += 1
                     continue
 
-                # Capped read to protect memory against oversized payload
-                raw_bytes = resp.raw.read(self.max_page_bytes)
+                # Read up to max_page_bytes with automatic gzip/deflate decompression
+                chunks = []
+                total_bytes = 0
+                for chunk in resp.iter_content(chunk_size=8192):
+                    chunks.append(chunk)
+                    total_bytes += len(chunk)
+                    if total_bytes >= self.max_page_bytes:
+                        break
+                raw_bytes = b"".join(chunks)
                 html = raw_bytes.decode(resp.encoding or "utf-8", errors="replace")
 
             except requests.RequestException as e:

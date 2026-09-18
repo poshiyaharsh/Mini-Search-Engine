@@ -81,6 +81,9 @@
             <polyline points="12 5 19 12 12 19"></polyline>
           </svg>
         </button>
+
+        <!-- Autocomplete Suggestions Dropdown -->
+        <div id="suggestionsDropdown" class="suggestions-dropdown hidden" role="listbox" aria-label="Search suggestions"></div>
       </form>
 
       <div class="suggestions-row">
@@ -153,6 +156,51 @@
         </div>
       </section>
 
+      <!-- Search Filters & Ranking Controls -->
+      <div class="filter-bar glass-panel" id="filterBar">
+        <div class="filter-group">
+          <span class="filter-label">Ranking:</span>
+          <div class="filter-pills" role="radiogroup" aria-label="Ranking algorithm">
+            <button type="button" class="filter-pill active" data-filter="algo" data-value="bm25" aria-checked="true">
+              <span class="pill-dot"></span>
+              <span>BM25</span>
+            </button>
+            <button type="button" class="filter-pill" data-filter="algo" data-value="cosine" aria-checked="false">
+              <span class="pill-dot"></span>
+              <span>Cosine TF-IDF</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <span class="filter-label">Source:</span>
+          <div class="filter-pills" role="radiogroup" aria-label="Document source">
+            <button type="button" class="filter-pill active" data-filter="source" data-value="all" aria-checked="true">
+              <span>All</span>
+            </button>
+            <button type="button" class="filter-pill" data-filter="source" data-value="local" aria-checked="false">
+              <span>Local Docs</span>
+            </button>
+            <button type="button" class="filter-pill" data-filter="source" data-value="web" aria-checked="false">
+              <span>Crawled Web</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="filter-group filter-group-score">
+          <label for="minScoreSelect" class="filter-label">Min Score:</label>
+          <div class="filter-select-wrap">
+            <select id="minScoreSelect" class="filter-select" aria-label="Minimum relevance score threshold">
+              <option value="0.0">Any (&ge; 0.0)</option>
+              <option value="0.05">&gt; 0.05</option>
+              <option value="0.10">&gt; 0.10</option>
+              <option value="0.25">&gt; 0.25</option>
+              <option value="0.50">&gt; 0.50</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       <div id="metaLine" class="meta-line" aria-live="polite"></div>
 
       <ol id="results" class="results"></ol>
@@ -168,21 +216,21 @@
         </div>
         <h3 class="empty-title">Ready to explore</h3>
         <p class="empty-desc">
-          Type a query above, click a suggested topic, or crawl a live URL. Results are scored by comparing your query's
-          TF&#8209;IDF vector against every document's vector — the closer the angle between them, the higher a document ranks.
+          Type a query above for real-time vocabulary autocompletion, or crawl a live URL.
+          Results are scored using <strong>Okapi BM25</strong> (with Robertson-Sp&auml;rck Jones IDF, term frequency saturation, and document length normalization) or vector <strong>Cosine TF&#8209;IDF</strong>, with exact phrase match boosting.
         </p>
         <div class="empty-features">
           <div class="feature-item">
             <span class="feature-badge">1</span>
-            <span>Sublinear TF Dampening</span>
+            <span>BM25 &amp; Phrase Boosting</span>
           </div>
           <div class="feature-item">
             <span class="feature-badge">2</span>
-            <span>Smooth Corpus IDF</span>
+            <span>Prefix Trie Autocomplete</span>
           </div>
           <div class="feature-item">
             <span class="feature-badge">3</span>
-            <span>Live Web Crawler Ingestion</span>
+            <span>Multi-Source &amp; Score Filters</span>
           </div>
         </div>
       </div>

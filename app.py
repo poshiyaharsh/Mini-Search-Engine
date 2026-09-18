@@ -144,13 +144,50 @@ def api_search():
     if len(query) > 500:
         return jsonify({"error": "Search query too long (max 500 characters)."}), 400
 
+    # Parse algorithm ('bm25' or 'cosine', default 'bm25')
+    raw_algo = request.args.get("algo", "bm25").lower().strip()
+    algo = "cosine" if raw_algo == "cosine" else "bm25"
+
+    # Parse source filter ('all', 'local', 'web')
+    raw_source = request.args.get("source", "all").lower().strip()
+    if raw_source in ("file", "local"):
+        source_filter = "local"
+    elif raw_source == "web":
+        source_filter = "web"
+    else:
+        source_filter = "all"
+
+    # Parse min_score cutoff
+    raw_min_score = request.args.get("min_score", "0.0")
+    try:
+        min_score = max(0.0, min(float(raw_min_score), 100.0))
+    except (ValueError, TypeError):
+        min_score = 0.0
+
     if not query:
-        return jsonify({"query": "", "count": 0, "results": [], "total_indexed": engine.N})
+        return jsonify({
+            "query": "",
+            "algo": algo,
+            "source": source_filter,
+            "min_score": min_score,
+            "count": 0,
+            "results": [],
+            "total_indexed": engine.N,
+        })
 
     try:
-        results = engine.search(query, top_k=15)
+        results = engine.search(
+            query,
+            top_k=15,
+            algo=algo,
+            source_filter=source_filter,
+            min_score=min_score,
+        )
         return jsonify({
             "query": query,
+            "algo": algo,
+            "source": source_filter,
+            "min_score": min_score,
             "count": len(results),
             "results": results,
             "total_indexed": engine.N,
@@ -158,6 +195,41 @@ def api_search():
     except Exception as e:
         logger.error("Search execution error: %s", e, exc_info=True)
         return jsonify({"error": "Search execution failed."}), 500
+
+
+@app.route("/api/suggest")
+def api_suggest():
+    """Returns top vocabulary completions for prefix starting characters."""
+    client_ip = request.remote_addr or "unknown"
+    if not check_rate_limit(f"suggest:{client_ip}", max_requests=150, window_seconds=60):
+        return jsonify({"error": "Suggestions rate limit exceeded. Please slow down."}), 429
+
+    raw_prefix = request.args.get("prefix", "")
+    if not isinstance(raw_prefix, str):
+        return jsonify({"prefix": "", "suggestions": []})
+
+    prefix = raw_prefix.strip()[:60]
+    if not prefix:
+        return jsonify({"prefix": "", "suggestions": []})
+
+    # Only accept alphanumeric prefix tokens
+    if not re.match(r"^[a-zA-Z0-9']+$", prefix):
+        return jsonify({"prefix": prefix, "suggestions": []})
+
+    try:
+        limit = max(1, min(int(request.args.get("limit", 8)), 20))
+    except (ValueError, TypeError):
+        limit = 8
+
+    try:
+        suggestions = engine.suggest(prefix, limit=limit)
+        return jsonify({
+            "prefix": prefix,
+            "suggestions": suggestions,
+        })
+    except Exception as e:
+        logger.error("Suggest execution error: %s", e, exc_info=True)
+        return jsonify({"error": "Failed to generate suggestions."}), 500
 
 
 @app.route("/api/stats")

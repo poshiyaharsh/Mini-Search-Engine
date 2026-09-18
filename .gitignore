@@ -24,3 +24,6 @@ Thumbs.db
 # Transient logs & test scratch files
 *.log
 scratch/
+
+# Runtime crawled pages (folder retained via .gitkeep)
+crawled_pages/*.json
