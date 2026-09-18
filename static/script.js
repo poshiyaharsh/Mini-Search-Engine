@@ -570,6 +570,7 @@ document.addEventListener("click", (e) => {
   if (userMenuBtn && userDropdown && !userMenuBtn.contains(e.target) && !userDropdown.contains(e.target)) {
     userDropdown.classList.add("hidden");
     userMenuBtn.classList.remove("expanded");
+    userMenuBtn.setAttribute("aria-expanded", "false");
   }
 
   const chip = e.target.closest(".query-chip");
@@ -579,6 +580,20 @@ document.addEventListener("click", (e) => {
     if (clearBtn) clearBtn.style.display = "flex";
     runSearch(q);
     window.scrollTo({ top: form.offsetTop - 40, behavior: "smooth" });
+  }
+});
+
+// Close open dropdowns with Escape key
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    hideSuggestions();
+    if (userDropdown && !userDropdown.classList.contains("hidden")) {
+      userDropdown.classList.add("hidden");
+      if (userMenuBtn) {
+        userMenuBtn.classList.remove("expanded");
+        userMenuBtn.setAttribute("aria-expanded", "false");
+      }
+    }
   }
 });
 
@@ -629,16 +644,27 @@ if (minScoreSelect) {
 if (userMenuBtn && userDropdown) {
   userMenuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    const isHidden = userDropdown.classList.contains("hidden");
-    userDropdown.classList.toggle("hidden");
-    userMenuBtn.classList.toggle("expanded", isHidden);
+    const willOpen = userDropdown.classList.contains("hidden");
+    if (willOpen) {
+      userDropdown.classList.remove("hidden");
+      userMenuBtn.classList.add("expanded");
+      userMenuBtn.setAttribute("aria-expanded", "true");
+    } else {
+      userDropdown.classList.add("hidden");
+      userMenuBtn.classList.remove("expanded");
+      userMenuBtn.setAttribute("aria-expanded", "false");
+    }
   });
 }
 
 if (openSavedSearchesBtn && savedSearchesSection) {
-  openSavedSearchesBtn.addEventListener("click", () => {
+  openSavedSearchesBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
     if (userDropdown) userDropdown.classList.add("hidden");
-    if (userMenuBtn) userMenuBtn.classList.remove("expanded");
+    if (userMenuBtn) {
+      userMenuBtn.classList.remove("expanded");
+      userMenuBtn.setAttribute("aria-expanded", "false");
+    }
     savedSearchesSection.classList.remove("hidden");
     loadSavedSearches();
     savedSearchesSection.scrollIntoView({ behavior: "smooth", block: "nearest" });

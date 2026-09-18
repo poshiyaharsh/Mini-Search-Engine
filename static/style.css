@@ -202,6 +202,11 @@ html, body {
   z-index: 1;
 }
 
+/* Universal hidden utility */
+.hidden {
+  display: none !important;
+}
+
 /* ---------- Glassmorphic Utility Primitives ---------- */
 .glass-panel {
   background: var(--glass-bg);
@@ -252,6 +257,8 @@ html, body {
   margin-bottom: 36px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   gap: 16px;
+  position: relative;
+  z-index: 100;
 }
 
 .brand {
@@ -415,6 +422,14 @@ html, body {
   white-space: nowrap;
 }
 
+.user-pill-btn .chevron-icon {
+  transition: transform var(--transition-normal);
+}
+
+.user-pill-btn.expanded .chevron-icon {
+  transform: rotate(180deg);
+}
+
 .user-dropdown {
   position: absolute;
   top: calc(100% + 10px);
@@ -429,6 +444,10 @@ html, body {
   padding: 10px 0;
   z-index: 1000;
   animation: dropdownFadeIn 0.2s ease-out;
+}
+
+.user-dropdown.hidden {
+  display: none !important;
 }
 
 @keyframes dropdownFadeIn {
@@ -1728,6 +1747,10 @@ h1 {
 .saved-searches-section {
   margin-bottom: 28px;
   animation: fadeIn 0.3s ease-out;
+}
+
+.saved-searches-section.hidden {
+  display: none !important;
 }
 
 .saved-searches-header {
