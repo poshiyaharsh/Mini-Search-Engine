@@ -1,5 +1,7 @@
 # Mini Search Engine
 
+**Live demo:** https://mini-search-engine-b4el.onrender.com/
+
 A full-text search engine built from scratch in Python and Flask. It indexes local text documents and crawled web pages using an inverted index, ranking results with Okapi BM25 and TF-IDF with Cosine Similarity. The project demonstrates core Information Retrieval (IR) principles, replacing basic substring matching with statistical term weighting, document length normalization, and phrase match boosting. User accounts, search history, and query bookmarking are persisted locally with SQLite and SQLAlchemy.
 
 ---

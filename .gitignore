@@ -1,49 +1,83 @@
-# Python bytecode & cache
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-build/
-dist/
-*.egg-info/
+# ====================================================================
+# Mini Search Engine - Git Ignore Rules
+# ====================================================================
 
-# Environments & secrets
+# Environment variables, keys, and secrets
 .env
 .env.*
 !.env.example
 *.env
+*.key
+*.pem
+*.cert
+*.crt
+config/secrets.*
+secrets.*
+
+# Python bytecode, builds, and distribution
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+.Python
+*.so
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
 venv/
 .venv/
 env/
+ENV/
+env.bak/
+venv.bak/
 
-# Editor & IDE configs
-.idea/
+# Databases and persistent local data
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+instance/
+
+# Editor and IDE configurations
 .vscode/
+.idea/
 *.swp
 *.swo
+*~
 
-# OS artifacts
+# Operating system artifacts
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Transient logs & test scratch files
+# Logs and transient runtime files
 *.log
-scratch/
+/tmp/
+tmp/
+*.pid
 
-# Runtime crawled pages (folder retained via .gitkeep)
-crawled_pages/*.json
-
-# SQLite Database
-instance/
-*.db
-*.sqlite3
-
-# Test & coverage artifacts
+# Test and code coverage artifacts
 .pytest_cache/
 .coverage
 .coverage.*
 htmlcov/
 coverage.xml
+.cache/
 
-# Node (if used)
-node_modules/
+# Crawled web pages cache (directory preserved via .gitkeep)
+crawled_pages/*.json
+!crawled_pages/.gitkeep
+
+# Graph analysis output and local scratch files
+graphify-out/
+scratch/
