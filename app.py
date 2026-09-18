@@ -1,29 +1,49 @@
 """
-Mini Search Engine - Hardened Flask Backend
-===========================================
-Serves the HTML/JS frontend, exposes the TF-IDF search API, and provides a
-crawling endpoint to index live web pages.
+Mini Search Engine - Hardened Flask Backend with Authentication
+==============================================================
+Serves the HTML/JS frontend, exposes BM25 & TF-IDF search APIs, Prefix Trie
+autocomplete suggestions, live web crawler, user authentication, and per-user
+saved search queries backed by SQLite.
 
 Security Hardening:
-  - Strict input validation and query size capping
-  - SSRF pre-screening on crawl seed URLs
-  - Concurrency locks preventing crawl/reindex race conditions
-  - In-memory rate limiting per client IP
+  - User password hashing via Werkzeug (scrypt/pbkdf2)
+  - CSRF protection via Flask-WTF on forms and mutating API endpoints
+  - Session cookies configured with HttpOnly, SameSite=Lax, and conditional Secure
+  - Strict database-level authorization preventing cross-user data leakage
+  - In-memory rate limiting per client IP (login brute force, search, crawl, suggest)
+  - SSRF pre-screening on crawl seed URLs & redirect validation
   - Security headers (CSP, X-Frame-Options, X-Content-Type-Options)
-  - Safe error handling preventing traceback leakage
-  - Production-safe debug configuration
 """
 
 import os
 import re
 import time
+import json
 import logging
 import threading
 from collections import defaultdict
-from flask import Flask, request, jsonify, render_template
+from flask import (
+    Flask,
+    request,
+    jsonify,
+    render_template,
+    redirect,
+    url_for,
+    flash,
+)
+from flask_login import (
+    LoginManager,
+    login_user,
+    logout_user,
+    login_required,
+    current_user,
+)
+from flask_wtf.csrf import CSRFProtect
 
 from search_engine import SearchEngine
 from crawler import WebCrawler, is_safe_url
+from models import db, User, SavedSearch
+from forms import LoginForm, SignupForm
 
 # Configure structured logging
 logging.basicConfig(
@@ -35,19 +55,50 @@ logger = logging.getLogger("MiniSearchEngine")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOC_DIR = os.path.join(BASE_DIR, "documents")
 CRAWLED_DIR = os.path.join(BASE_DIR, "crawled_pages")
+INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 
 os.makedirs(DOC_DIR, exist_ok=True)
 os.makedirs(CRAWLED_DIR, exist_ok=True)
+os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 app = Flask(__name__)
 
-# Enforce 1MB maximum payload size
-app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
+# Security & Storage Configuration
+app.config["SECRET_KEY"] = os.environ.get(
+    "SECRET_KEY", "mini-search-engine-dev-secret-key-38f90a9b2c1e4d"
+)
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(INSTANCE_DIR, 'app.db')}"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1MB max payload
+
+# Session Cookie Security
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
+
+# Initialize Extensions
+csrf = CSRFProtect(app)
+db.init_app(app)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = "login"
+login_manager.login_message = "Please sign in to access your saved searches."
+login_manager.login_message_category = "info"
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return db.session.get(User, int(user_id))
+    except (ValueError, TypeError):
+        return None
+
 
 # Concurrency lock for web crawling & reindexing
 crawl_lock = threading.Lock()
 
-# Initialize core services
+# Initialize core IR engine and crawler
 engine = SearchEngine(doc_dir=DOC_DIR, crawled_dir=CRAWLED_DIR)
 crawler = WebCrawler(crawled_dir=CRAWLED_DIR, delay_seconds=1.0)
 
@@ -63,7 +114,6 @@ def check_rate_limit(client_ip: str, max_requests: int, window_seconds: int) -> 
     now = time.time()
     with rate_limit_lock:
         timestamps = request_history[client_ip]
-        # Prune timestamps outside window
         request_history[client_ip] = [t for t in timestamps if now - t < window_seconds]
         if len(request_history[client_ip]) >= max_requests:
             return False
@@ -98,7 +148,9 @@ def handle_bad_request(e):
 
 @app.errorhandler(404)
 def handle_not_found(e):
-    return jsonify({"error": "Resource not found."}), 404
+    if request.path.startswith("/api/"):
+        return jsonify({"error": "Resource not found."}), 404
+    return render_template("index.html", doc_count=engine.N), 404
 
 
 @app.errorhandler(405)
@@ -123,7 +175,159 @@ def handle_internal_error(e):
 
 
 # ------------------------------------------------------------------
-# Routes
+# Authentication Routes
+# ------------------------------------------------------------------
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if current_user.is_authenticated:
+        return redirect(url_for("home"))
+
+    form = SignupForm()
+    if form.validate_on_submit():
+        clean_email = form.email.data.strip().lower()
+        existing_user = User.query.filter_by(email=clean_email).first()
+        if existing_user:
+            flash("An account with that email already exists. Please sign in instead.", "warning")
+            return render_template("signup.html", form=form)
+
+        user = User(email=clean_email)
+        user.set_password(form.password.data)
+        db.session.add(user)
+        db.session.commit()
+
+        login_user(user, remember=True)
+        flash("Welcome! Your account has been successfully created.", "success")
+        return redirect(url_for("home"))
+
+    return render_template("signup.html", form=form)
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for("home"))
+
+    form = LoginForm()
+    if form.validate_on_submit():
+        client_ip = request.remote_addr or "unknown"
+        if not check_rate_limit(f"login:{client_ip}", max_requests=5, window_seconds=60):
+            flash("Too many failed sign-in attempts. Please wait a moment and try again.", "error")
+            return render_template("login.html", form=form), 429
+
+        clean_email = form.email.data.strip().lower()
+        user = User.query.filter_by(email=clean_email).first()
+
+        if user and user.check_password(form.password.data):
+            login_user(user, remember=True)
+            flash("Signed in successfully.", "success")
+            next_page = request.args.get("next")
+            if next_page and next_page.startswith("/"):
+                return redirect(next_page)
+            return redirect(url_for("home"))
+
+        flash("Invalid email or password. Please try again.", "error")
+
+    return render_template("login.html", form=form)
+
+
+@app.route("/logout", methods=["POST"])
+@login_required
+def logout():
+    logout_user()
+    flash("You have been signed out.", "info")
+    return redirect(url_for("home"))
+
+
+# ------------------------------------------------------------------
+# Saved Searches API
+# ------------------------------------------------------------------
+@app.route("/api/searches", methods=["GET"])
+@login_required
+def api_get_saved_searches():
+    """Returns the current user's saved search queries, newest first."""
+    searches = (
+        SavedSearch.query.filter_by(user_id=current_user.id)
+        .order_by(SavedSearch.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return jsonify({
+        "success": True,
+        "count": len(searches),
+        "searches": [s.to_dict() for s in searches],
+    })
+
+
+@app.route("/api/searches", methods=["POST"])
+@login_required
+def api_save_search():
+    """Saves a search query and its active filters for the logged-in user."""
+    if not request.is_json:
+        return jsonify({"error": "Request Content-Type must be application/json."}), 400
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Malformed JSON payload."}), 400
+
+    raw_query = data.get("query", "")
+    if not isinstance(raw_query, str):
+        return jsonify({"error": "Invalid query."}), 400
+
+    query_text = raw_query.strip()[:500]
+    if not query_text:
+        return jsonify({"error": "Search query cannot be empty."}), 400
+
+    raw_algo = str(data.get("algo", "bm25")).lower().strip()
+    algo = "cosine" if raw_algo == "cosine" else "bm25"
+
+    filters = data.get("filters", {})
+    if not isinstance(filters, dict):
+        filters = {}
+
+    clean_filters = {
+        "source": str(filters.get("source", "all")).lower().strip(),
+        "min_score": max(0.0, float(filters.get("min_score", 0.0) or 0.0)),
+    }
+
+    # Save to database strictly associated with current_user.id
+    saved = SavedSearch(
+        user_id=current_user.id,
+        query_text=query_text,
+        algo=algo,
+        filters_json=json.dumps(clean_filters),
+    )
+    db.session.add(saved)
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "saved_search": saved.to_dict(),
+    }), 201
+
+
+@app.route("/api/searches/<int:search_id>", methods=["DELETE"])
+@login_required
+def api_delete_saved_search(search_id: int):
+    """Deletes a saved search with strict ownership verification."""
+    search = db.session.get(SavedSearch, search_id)
+    if not search:
+        return jsonify({"error": "Saved search not found."}), 404
+
+    # Strict authorization check
+    if search.user_id != current_user.id:
+        return jsonify({"error": "Forbidden: You do not have permission to delete this search."}), 403
+
+    db.session.delete(search)
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "deleted_id": search_id,
+    })
+
+
+# ------------------------------------------------------------------
+# Search & Discovery Routes
 # ------------------------------------------------------------------
 @app.route("/")
 def home():
@@ -248,7 +452,6 @@ def api_term(term):
         return jsonify({"error": "Invalid term."}), 400
 
     clean_term = term.strip()[:60]
-    # Path traversal & injection guard: only allow word tokens
     if not re.match(r"^[a-zA-Z0-9']+$", clean_term):
         return jsonify({"error": "Term must be an alphanumeric word token."}), 400
 
@@ -260,6 +463,7 @@ def api_term(term):
 
 
 @app.route("/api/crawl", methods=["POST"])
+@csrf.exempt  # Allow guest / programmatic crawl without mandatory CSRF form token
 def api_crawl():
     """
     Crawls web pages starting from seed URLs, saves them, and refreshes the search index.
@@ -360,7 +564,13 @@ def api_crawl():
         crawl_lock.release()
 
 
+# ------------------------------------------------------------------
+# Application Startup & DB Initialization
+# ------------------------------------------------------------------
+with app.app_context():
+    db.create_all()
+
+
 if __name__ == "__main__":
-    # Safe production config: debug mode disabled unless explicitly opted-in via env
     flask_debug = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true")
     app.run(debug=flask_debug, host="127.0.0.1", port=5000)

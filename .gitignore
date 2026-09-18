@@ -27,3 +27,8 @@ scratch/
 
 # Runtime crawled pages (folder retained via .gitkeep)
 crawled_pages/*.json
+
+# SQLite Database
+instance/
+*.db
+*.sqlite3

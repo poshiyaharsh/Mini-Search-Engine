@@ -1,12 +1,13 @@
 /**
  * Mini Search Engine - Hardened Frontend Logic
- * Connects to Flask /api/search, /api/suggest, /api/stats, and /api/crawl
+ * Connects to Flask /api/search, /api/suggest, /api/searches, /api/stats, and /api/crawl
  *
  * Capabilities:
  *  - Okapi BM25 (default) & Cosine TF-IDF ranking with phrase-match boosting
  *  - Real-time debounced autocomplete via Prefix Trie with keyboard navigation
  *  - Interactive filter controls for algorithm, source, and min score cutoff
- *  - XSS sanitization, safe URL checking, and snippet token highlighting
+ *  - User session management, topbar dropdown, and saved searches integration
+ *  - XSS sanitization, safe URL checking, CSRF token handling, and snippet highlighting
  */
 
 const form = document.getElementById("searchForm");
@@ -24,6 +25,16 @@ const docCountBadge = document.getElementById("docCountBadge");
 const suggestionsDropdown = document.getElementById("suggestionsDropdown");
 const filterBar = document.getElementById("filterBar");
 const minScoreSelect = document.getElementById("minScoreSelect");
+
+// User Menu & Saved Searches Elements
+const userMenuBtn = document.getElementById("userMenuBtn");
+const userDropdown = document.getElementById("userDropdown");
+const saveSearchBtn = document.getElementById("saveSearchBtn");
+const savedSearchesSection = document.getElementById("savedSearchesSection");
+const openSavedSearchesBtn = document.getElementById("openSavedSearchesBtn");
+const closeSavedSearchesBtn = document.getElementById("closeSavedSearchesBtn");
+const savedSearchesList = document.getElementById("savedSearchesList");
+const savedCountBadge = document.getElementById("savedCountBadge");
 
 // Crawler Elements
 const toggleCrawlerEl = document.getElementById("toggleCrawler");
@@ -47,7 +58,7 @@ let currentSuggestions = [];
 let suggestDebounceTimer = null;
 
 // ------------------------------------------------------------------
-// XSS Sanitization & URL Verification
+// XSS Sanitization, URL Verification & CSRF
 // ------------------------------------------------------------------
 function escapeHtml(str) {
   if (str === null || str === undefined) return "";
@@ -62,11 +73,15 @@ function escapeHtml(str) {
 function sanitizeUrl(url) {
   if (!url || typeof url !== "string") return "";
   const trimmed = url.trim();
-  // Strictly enforce http and https schemes to prevent javascript: or data: XSS
   if (/^https?:\/\//i.test(trimmed)) {
     return trimmed;
   }
   return "";
+}
+
+function getCsrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute("content") : "";
 }
 
 function highlightSnippet(snippet, queryWords) {
@@ -189,7 +204,6 @@ function handleAutocompleteInput() {
     return;
   }
 
-  // Extract the last word token being typed
   const words = val.trim().split(/\s+/);
   const lastWord = words[words.length - 1];
   const cleanPrefix = lastWord.replace(/[^a-zA-Z0-9']/g, "").toLowerCase();
@@ -221,6 +235,9 @@ function resetToDefaultState() {
   resultsEl.innerHTML = "";
   metaLine.innerHTML = "";
   hideSuggestions();
+  if (saveSearchBtn) {
+    saveSearchBtn.classList.add("hidden");
+  }
   if (emptyState) {
     emptyState.classList.remove("hidden");
     emptyState.style.display = "block";
@@ -245,6 +262,9 @@ async function runSearch(query) {
   const algoText = currentAlgo === "bm25" ? "BM25" : "Cosine";
   metaLine.textContent = `ranking with ${algoText}…`;
   resultsEl.innerHTML = "";
+  if (saveSearchBtn) {
+    saveSearchBtn.classList.add("hidden");
+  }
 
   try {
     const url = `/api/search?q=${encodeURIComponent(trimmed)}&algo=${encodeURIComponent(currentAlgo)}&source=${encodeURIComponent(currentSource)}&min_score=${currentMinScore}`;
@@ -292,6 +312,11 @@ async function runSearch(query) {
     const srcLabel = data.source && data.source !== "all" ? ` · source: ${data.source}` : "";
     const scoreLabel = data.min_score > 0 ? ` · min score: ${data.min_score}` : "";
     metaLine.textContent = `${data.count} result${data.count === 1 ? "" : "s"} for "${data.query}" — ranked by ${algoLabel}${srcLabel}${scoreLabel}`;
+
+    // Reveal the "Save Search" button for authenticated users
+    if (saveSearchBtn) {
+      saveSearchBtn.classList.remove("hidden");
+    }
 
     const queryWords = data.query.toLowerCase().split(/\s+/).filter(Boolean);
     const maxScore = (data.results[0] && data.results[0].score) || 1;
@@ -361,6 +386,131 @@ async function runSearch(query) {
 }
 
 // ------------------------------------------------------------------
+// Saved Searches Management
+// ------------------------------------------------------------------
+async function loadSavedSearches() {
+  if (!savedSearchesList) return;
+  try {
+    const res = await fetch("/api/searches");
+    if (!res.ok) return;
+    const data = await res.json();
+    const items = data.searches || [];
+
+    if (savedCountBadge) {
+      savedCountBadge.textContent = items.length;
+    }
+
+    if (items.length === 0) {
+      savedSearchesList.innerHTML = `<div class="saved-empty">You haven't saved any searches yet. Run a search and click "Save Search" to bookmark it!</div>`;
+      return;
+    }
+
+    savedSearchesList.innerHTML = items.map((s) => {
+      const filter = s.filters || {};
+      const src = filter.source && filter.source !== "all" ? `source: ${escapeHtml(filter.source)}` : "all sources";
+      const minScore = filter.min_score > 0 ? `min: ${filter.min_score}` : "";
+      const formattedDate = s.created_at ? new Date(s.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "";
+
+      return `
+        <div class="saved-search-item" data-id="${s.id}">
+          <div class="saved-search-info">
+            <span class="saved-search-query">"${escapeHtml(s.query)}"</span>
+            <div class="saved-search-meta">
+              <span class="saved-meta-tag">${escapeHtml((s.algo || "bm25").toUpperCase())}</span>
+              <span class="saved-meta-tag">${src}</span>
+              ${minScore ? `<span class="saved-meta-tag">${minScore}</span>` : ""}
+              <span>${escapeHtml(formattedDate)}</span>
+            </div>
+          </div>
+          <div class="saved-search-actions">
+            <button type="button" class="btn-rerun" data-query="${escapeHtml(s.query)}" data-algo="${escapeHtml(s.algo || 'bm25')}" data-source="${escapeHtml(filter.source || 'all')}" data-min-score="${filter.min_score || 0.0}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="1 4 1 10 7 10"></polyline>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+              </svg>
+              <span>Re-run</span>
+            </button>
+            <button type="button" class="btn-delete-saved" data-id="${s.id}" title="Delete this saved search">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    // Attach click listeners for re-run and delete
+    savedSearchesList.querySelectorAll(".btn-rerun").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const q = btn.dataset.query;
+        const algo = btn.dataset.algo;
+        const src = btn.dataset.source;
+        const minScore = parseFloat(btn.dataset.minScore) || 0.0;
+
+        input.value = q;
+        if (clearBtn) clearBtn.style.display = "flex";
+
+        // Set algorithm pill
+        currentAlgo = algo;
+        document.querySelectorAll('[data-filter="algo"]').forEach((p) => {
+          const active = p.dataset.value === algo;
+          p.classList.toggle("active", active);
+          p.setAttribute("aria-checked", active ? "true" : "false");
+        });
+
+        // Set source pill
+        currentSource = src;
+        document.querySelectorAll('[data-filter="source"]').forEach((p) => {
+          const active = p.dataset.value === src;
+          p.classList.toggle("active", active);
+          p.setAttribute("aria-checked", active ? "true" : "false");
+        });
+
+        // Set min score
+        currentMinScore = minScore;
+        if (minScoreSelect) {
+          minScoreSelect.value = minScore.toFixed(2);
+          if (!minScoreSelect.value) minScoreSelect.value = "0.0";
+        }
+
+        runSearch(q);
+        window.scrollTo({ top: form.offsetTop - 40, behavior: "smooth" });
+      });
+    });
+
+    savedSearchesList.querySelectorAll(".btn-delete-saved").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const searchId = btn.dataset.id;
+        if (!confirm("Remove this saved search?")) return;
+
+        try {
+          const csrfToken = getCsrfToken();
+          const res = await fetch(`/api/searches/${searchId}`, {
+            method: "DELETE",
+            headers: {
+              "X-CSRFToken": csrfToken,
+            },
+          });
+          if (res.ok) {
+            loadSavedSearches();
+          } else {
+            const err = await res.json().catch(() => ({}));
+            alert(`Failed to delete: ${err.error || res.status}`);
+          }
+        } catch (err) {
+          alert(`Error: ${err.message}`);
+        }
+      });
+    });
+  } catch (err) {
+    console.error("Failed to load saved searches:", err);
+  }
+}
+
+// ------------------------------------------------------------------
 // Event Listeners
 // ------------------------------------------------------------------
 form.addEventListener("submit", (e) => {
@@ -411,10 +561,15 @@ input.addEventListener("keydown", (e) => {
   }
 });
 
-// Close suggestions dropdown on click outside
+// Close dropdowns on outside click
 document.addEventListener("click", (e) => {
   if (suggestionsDropdown && !form.contains(e.target)) {
     hideSuggestions();
+  }
+
+  if (userMenuBtn && userDropdown && !userMenuBtn.contains(e.target) && !userDropdown.contains(e.target)) {
+    userDropdown.classList.add("hidden");
+    userMenuBtn.classList.remove("expanded");
   }
 
   const chip = e.target.closest(".query-chip");
@@ -468,6 +623,103 @@ if (minScoreSelect) {
       runSearch(currentQuery);
     }
   });
+}
+
+// User Menu Controls
+if (userMenuBtn && userDropdown) {
+  userMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const isHidden = userDropdown.classList.contains("hidden");
+    userDropdown.classList.toggle("hidden");
+    userMenuBtn.classList.toggle("expanded", isHidden);
+  });
+}
+
+if (openSavedSearchesBtn && savedSearchesSection) {
+  openSavedSearchesBtn.addEventListener("click", () => {
+    if (userDropdown) userDropdown.classList.add("hidden");
+    if (userMenuBtn) userMenuBtn.classList.remove("expanded");
+    savedSearchesSection.classList.remove("hidden");
+    loadSavedSearches();
+    savedSearchesSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+}
+
+if (closeSavedSearchesBtn && savedSearchesSection) {
+  closeSavedSearchesBtn.addEventListener("click", () => {
+    savedSearchesSection.classList.add("hidden");
+  });
+}
+
+// Save Search Button Handler
+if (saveSearchBtn) {
+  saveSearchBtn.addEventListener("click", async () => {
+    const q = input.value.trim();
+    if (!q) return;
+
+    saveSearchBtn.disabled = true;
+    saveSearchBtn.innerHTML = `<span>Saving...</span>`;
+
+    try {
+      const csrfToken = getCsrfToken();
+      const res = await fetch("/api/searches", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken,
+        },
+        body: JSON.stringify({
+          query: q,
+          algo: currentAlgo,
+          filters: {
+            source: currentSource,
+            min_score: currentMinScore,
+          },
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Server returned error ${res.status}`);
+      }
+
+      saveSearchBtn.classList.add("saved");
+      saveSearchBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+        </svg>
+        <span>Saved!</span>
+      `;
+
+      loadSavedSearches();
+
+      setTimeout(() => {
+        saveSearchBtn.classList.remove("saved");
+        saveSearchBtn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+          </svg>
+          <span class="btn-text">Save Search</span>
+        `;
+        saveSearchBtn.disabled = false;
+      }, 2000);
+    } catch (err) {
+      console.error("Save search error:", err);
+      alert(`Could not save search: ${err.message}`);
+      saveSearchBtn.disabled = false;
+      saveSearchBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+        </svg>
+        <span class="btn-text">Save Search</span>
+      `;
+    }
+  });
+}
+
+// Automatically load saved searches count if badge exists
+if (savedCountBadge) {
+  loadSavedSearches();
 }
 
 // ------------------------------------------------------------------

@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Mini Search Engine - Vector space search engine with built-in breadth-first web crawler and TF-IDF cosine ranking." />
-  <title>Mini Search Engine · Vector Space Search &amp; Web Crawler</title>
+  <meta name="description" content="Mini Search Engine - Okapi BM25 and vector space search engine with built-in web crawler, user accounts, and saved searches." />
+  <meta name="csrf-token" content="{{ csrf_token() }}" />
+  <title>Mini Search Engine · BM25 Search &amp; Web Crawler</title>
   
   <!-- Modern Typography: Plus Jakarta Sans & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -36,23 +37,81 @@
           </svg>
         </div>
         <span class="brand-text">mini-search-engine</span>
-        <span class="brand-pill">TF-IDF &bull; Web Crawler</span>
+        <span class="brand-pill">BM25 &bull; Crawler</span>
       </div>
 
-      <div class="index-status" id="indexStatus">
-        <span class="status-dot"></span>
-        <span class="status-text">index ready · <strong id="docCountBadge">{{ doc_count }}</strong> documents</span>
+      <div class="topbar-actions">
+        <div class="index-status" id="indexStatus">
+          <span class="status-dot"></span>
+          <span class="status-text">index ready · <strong id="docCountBadge">{{ doc_count }}</strong> documents</span>
+        </div>
+
+        {% if current_user.is_authenticated %}
+          <div class="user-menu-container" id="userMenuContainer">
+            <button type="button" class="user-pill-btn" id="userMenuBtn" aria-expanded="false" aria-haspopup="true">
+              <span class="user-avatar">{{ current_user.email[:1].upper() }}</span>
+              <span class="user-email-text">{{ current_user.email }}</span>
+              <svg class="chevron-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+
+            <div class="user-dropdown glass-card hidden" id="userDropdown">
+              <div class="user-dropdown-header">
+                <span class="user-dropdown-label">Signed in as</span>
+                <span class="user-dropdown-email" title="{{ current_user.email }}">{{ current_user.email }}</span>
+              </div>
+              <div class="user-dropdown-divider"></div>
+              <button type="button" class="user-dropdown-item" id="openSavedSearchesBtn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>Saved Searches</span>
+                <span class="badge-count" id="savedCountBadge">0</span>
+              </button>
+              <form method="POST" action="{{ url_for('logout') }}" class="logout-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="user-dropdown-item item-danger">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                    <polyline points="16 17 21 12 16 7"></polyline>
+                    <line x1="21" y1="12" x2="9" y2="12"></line>
+                  </svg>
+                  <span>Sign Out</span>
+                </button>
+              </form>
+            </div>
+          </div>
+        {% else %}
+          <div class="auth-buttons">
+            <a href="{{ url_for('login') }}" class="glass-pill-btn auth-nav-btn">Sign In</a>
+            <a href="{{ url_for('signup') }}" class="btn-primary auth-nav-btn-primary">Sign Up</a>
+          </div>
+        {% endif %}
       </div>
     </header>
 
     <main>
+      <!-- Flash Messages -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-messages">
+            {% for category, message in messages %}
+              <div class="flash-alert flash-{{ category }}" role="alert">
+                <span>{{ message }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
       <div class="hero-section">
         <div class="hero-badge">
           <span class="hero-badge-dot"></span>
-          <span>Vector Space Information Retrieval &amp; Crawler</span>
+          <span>Okapi BM25 Ranking &bull; Prefix Autocomplete &bull; Accounts</span>
         </div>
         <h1>Search your documents &amp; <span class="gradient-text">live web pages</span></h1>
-        <p class="sub">Ranked by TF&#8209;IDF term vectors and cosine similarity — crawl live websites or search local notes.</p>
+        <p class="sub">Ranked by Okapi BM25 with term saturation, document length normalization, and phrase boosting — or switch to Cosine TF&#8209;IDF.</p>
       </div>
 
       <form id="searchForm" class="search-row glass-panel" autocomplete="off">
@@ -96,6 +155,35 @@
         </div>
       </div>
 
+      {% if current_user.is_authenticated %}
+      <!-- Saved Searches Collapsible Panel -->
+      <section class="saved-searches-section glass-card hidden" id="savedSearchesSection">
+        <div class="saved-searches-header">
+          <div class="saved-title-group">
+            <div class="saved-badge-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </div>
+            <div>
+              <h2 class="saved-title">Your Saved Searches</h2>
+              <p class="saved-subtitle">Click "Re-run" to repeat a query with its saved algorithm and filters</p>
+            </div>
+          </div>
+          <button type="button" class="close-btn" id="closeSavedSearchesBtn" aria-label="Close saved searches panel">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div id="savedSearchesList" class="saved-searches-list">
+          <div class="saved-loading">Loading your saved queries…</div>
+        </div>
+      </section>
+      {% endif %}
+
       <!-- Web Crawler Section -->
       <section class="crawler-section glass-card" id="crawlerSection">
         <div class="crawler-header" id="toggleCrawler">
@@ -109,7 +197,7 @@
             </div>
             <div>
               <h2 class="crawler-title">Live Web Crawler</h2>
-              <p class="crawler-subtitle">Index live websites into the vector index &bull; Respects robots.txt</p>
+              <p class="crawler-subtitle">Index live websites into the search index &bull; Respects robots.txt &amp; SSRF safe</p>
             </div>
           </div>
           <button type="button" class="glass-pill-btn" id="crawlerToggleBtn" aria-expanded="false">
@@ -201,7 +289,17 @@
         </div>
       </div>
 
-      <div id="metaLine" class="meta-line" aria-live="polite"></div>
+      <div class="meta-action-row">
+        <div id="metaLine" class="meta-line" aria-live="polite"></div>
+        {% if current_user.is_authenticated %}
+          <button type="button" id="saveSearchBtn" class="btn-save-search hidden" title="Save this search query to your account">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+            </svg>
+            <span class="btn-text">Save Search</span>
+          </button>
+        {% endif %}
+      </div>
 
       <ol id="results" class="results"></ol>
 
@@ -230,7 +328,7 @@
           </div>
           <div class="feature-item">
             <span class="feature-badge">3</span>
-            <span>Multi-Source &amp; Score Filters</span>
+            <span>Accounts &amp; Saved Searches</span>
           </div>
         </div>
       </div>

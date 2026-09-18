@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Sign in to your Mini Search Engine account to access personal query history and saved searches." />
+  <title>Sign In · Mini Search Engine</title>
+
+  <!-- Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body class="auth-page">
+  <!-- Ambient gradient mesh & glowing blurred orbs -->
+  <div class="bg-ambient" aria-hidden="true">
+    <div class="mesh-gradient"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="grid-texture"></div>
+  </div>
+
+  <div class="auth-wrapper">
+    <div class="auth-card glass-card">
+      <div class="auth-header">
+        <a href="{{ url_for('home') }}" class="brand" title="Back to search">
+          <div class="brand-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              <path d="m11 8 3 3-3 3"></path>
+            </svg>
+          </div>
+          <span class="brand-text">mini-search-engine</span>
+        </a>
+        <h1 class="auth-title">Welcome back</h1>
+        <p class="auth-subtitle">Sign in to access your personal query history &amp; saved searches</p>
+      </div>
+
+      <!-- Flash Messages -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flash-messages">
+            {% for category, message in messages %}
+              <div class="flash-alert flash-{{ category }}" role="alert">
+                <span>{{ message }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <form method="POST" action="{{ url_for('login', next=request.args.get('next')) }}" class="auth-form" novalidate>
+        {{ form.hidden_tag() }}
+
+        <div class="form-group-glass">
+          <label for="email">{{ form.email.label.text }}</label>
+          {{ form.email(class_="auth-input" + (" is-invalid" if form.email.errors else "")) }}
+          {% for error in form.email.errors %}
+            <span class="field-error">{{ error }}</span>
+          {% endfor %}
+        </div>
+
+        <div class="form-group-glass">
+          <label for="password">{{ form.password.label.text }}</label>
+          {{ form.password(class_="auth-input" + (" is-invalid" if form.password.errors else "")) }}
+          {% for error in form.password.errors %}
+            <span class="field-error">{{ error }}</span>
+          {% endfor %}
+        </div>
+
+        <button type="submit" class="btn-primary btn-auth">
+          <span>Sign In</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </button>
+      </form>
+
+      <div class="auth-footer">
+        <p>Don't have an account? <a href="{{ url_for('signup') }}" class="auth-link">Create one</a></p>
+        <p class="auth-return"><a href="{{ url_for('home') }}" class="auth-link-subtle">&larr; Return to search</a></p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

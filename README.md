@@ -11,20 +11,25 @@ No external search library (like Lucene, Elasticsearch, or Whoosh) is used anywh
 
 ```
 mini-search-engine/
-├── app.py                  # Flask app: frontend routes, search, suggest, and crawl endpoints
+├── app.py                  # Flask app: auth routes, search, suggest, saved searches, and crawler APIs
 ├── search_engine.py        # Core IR: Prefix Trie, BM25 ranking, cosine similarity, filters
 ├── crawler.py              # Web crawler: BFS queue, robots.txt compliance, HTML parser, SSRF defense
-├── requirements.txt        # Flask, requests, beautifulsoup4, lxml, urllib3, werkzeug
+├── models.py               # SQLite database models: User and SavedSearch via Flask-SQLAlchemy
+├── forms.py                # WTForms: LoginForm & SignupForm with CSRF and validation
+├── requirements.txt        # Flask, Flask-SQLAlchemy, Flask-Login, Flask-WTF, beautifulsoup4, etc.
+├── instance/               # Local SQLite database (instance/app.db - ignored by git)
 ├── documents/               # Local corpus: 10 sample notes/articles (.txt)
 │   ├── ai_basics.txt
 │   ├── python_programming.txt
 │   └── ... (8 more)
 ├── crawled_pages/          # Persisted crawled web pages (saved as JSON)
 ├── templates/
-│   └── index.html          # Glassmorphic search UI with live filter bar and crawler modal
+│   ├── index.html          # Glassmorphic search UI with user menu, filter bar, and saved searches
+│   ├── login.html          # Glassmorphic sign-in page with CSRF protection
+│   └── signup.html         # Glassmorphic registration page with password confirmation
 └── static/
-    ├── style.css           # Glass tokens, animated ambient mesh, dropdown, and filter styles
-    └── script.js           # Search client, debounced autocomplete, keyboard nav, crawler controls
+    ├── style.css           # Glass tokens, ambient mesh, user dropdown, auth forms, drawer styles
+    └── script.js           # Search client, debounced autocomplete, saved searches manager
 ```
 
 ---
@@ -129,8 +134,29 @@ Open **http://127.0.0.1:5000** in your browser.
 
 ---
 
+## User Accounts & Saved Searches
+
+The search engine features full user authentication and personal query bookmarking while maintaining **100% public access** for anonymous visitors to search and crawl.
+
+### 1. Authentication Architecture
+- **Flask-Login Session Management:** Tracks authenticated sessions securely using signed session cookies (`HttpOnly=True`, `SameSite=Lax`, and `Secure` dynamically enabled in production).
+- **Werkzeug Password Hashing:** Passwords are cryptographically hashed using `scrypt` or `pbkdf2:sha256` before being stored. Plaintext passwords are never saved.
+- **Flask-WTF CSRF Protection:** All forms (login, registration, logout) and mutating API endpoints require valid CSRF tokens submitted via form fields or `X-CSRFToken` headers.
+- **Brute-Force Rate Limiting:** Enforces an in-memory limit of **5 login attempts per minute** per client IP, returning HTTP 429 when exceeded.
+- **SQLite Database (`instance/app.db`):** Backed by Flask-SQLAlchemy with `User` and `SavedSearch` models, automatically created on startup.
+
+### 2. Saved Searches & Privacy Isolation
+- **1-Click Save:** Authenticated users can click **"Save Search"** directly from search results to save their query string, selected algorithm (`bm25` vs `cosine`), and active filter settings (`source`, `min_score`).
+- **Strict Authorization Isolation:** Users can only view and delete their own saved searches. Attempting to access or delete another user's saved search returns `403 Forbidden`.
+- **1-Click Re-run:** Re-running a saved query restores the exact search query and all filter criteria instantly.
+
+---
+
 ## API Endpoints
 
+### Public Endpoints
+- `GET /`
+  - Glassmorphic search interface, live stats, filter controls, and crawler modal.
 - `GET /api/search?q=<query>&algo=<bm25|cosine>&source=<all|local|web>&min_score=<float>`
   - Returns ranked JSON results with scores, snippet highlights, phrase match flags, and applied filter metadata.
 - `GET /api/suggest?prefix=<term>&limit=8`
@@ -141,6 +167,20 @@ Open **http://127.0.0.1:5000** in your browser.
   - Returns total documents, local documents, crawled web pages, unique terms, and average document length (`avgdl`).
 - `GET /api/term/<word>`
   - Inspects the raw posting list and IDF for a specific vocabulary word.
+
+### Authentication & Saved Searches Endpoints
+- `GET /signup` / `POST /signup`
+  - Account creation with email validation and password confirmation.
+- `GET /login` / `POST /login`
+  - User sign-in with rate-limiting and session creation.
+- `POST /logout`
+  - Secure session termination (requires CSRF token).
+- `GET /api/searches` *(Requires Auth)*
+  - Returns the logged-in user's saved searches in reverse-chronological order.
+- `POST /api/searches` *(Requires Auth & CSRF)*
+  - Saves a search query, algorithm, and filter options for the authenticated user.
+- `DELETE /api/searches/<id>` *(Requires Auth & CSRF)*
+  - Deletes a saved search with strict ownership verification.
 
 ---
 
