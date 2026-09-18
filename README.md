@@ -196,3 +196,56 @@ python search_engine.py "machine learning" cosine
 # Run a standalone crawl test:
 python crawler.py "https://en.wikipedia.org/wiki/Search_engine"
 ```
+
+---
+
+## Automated Testing & Quality Assurance
+
+The project includes an enterprise-grade automated test suite built with **`pytest`**, **`pytest-cov`**, and **`responses`**, providing **88%+ code coverage** across all core modules with zero reliance on live network access or real data mutations.
+
+### Test Architecture
+
+1. **Deterministic Test Infrastructure (`tests/conftest.py`):**
+   - **Isolated Corpus:** Uses temporary fixtures with fixed, known text files (`doc1.txt`, `doc2.txt`, `doc3.txt`), ensuring searches and ranking calculations are 100% reproducible.
+   - **Isolated SQLite Database:** Uses an in-memory or temporary database (`tmp_path / "test_app.db"`), cleanly created and destroyed per test run so tests never touch production or local databases (`instance/app.db`).
+   - **Flask Test Client:** Executes full HTTP requests against Flask routes in-memory without needing a live development server.
+
+2. **Unit Tests — IR Core (`tests/test_search_engine.py`):**
+   - Tokenization edge cases (stopwords, punctuation, uppercase, numbers, apostrophes, empty strings, oversized tokens).
+   - Prefix Trie insertion, case insensitivity, and autocompletion ranking by document frequency (`df`).
+   - Robertson-Spärck Jones BM25 IDF positivity and asymptotic term saturation ($k_1 = 1.5$).
+   - Document length normalization ($b = 0.75$) and phrase-match boosting ($+30\%$).
+   - Multi-dimensional filters (source: `local` vs `web`, `min_score` cutoff).
+
+3. **API & Security Tests (`tests/test_api.py`):**
+   - `/api/search`, `/api/suggest`, `/api/stats`, `/api/term/<word>` endpoint validation and path traversal defenses.
+   - User authentication: signup validation, duplicate email rejection, weak password checks (<8 chars), login failure, and session logout.
+   - Brute-force rate limiting: verification of HTTP 429 after excessive rapid attempts.
+   - **Critical Security Isolation:** Verifies that User B cannot see User A's saved queries (`count == 0`), and any attempt by User B to delete User A's query strictly returns **`HTTP 403 Forbidden`**.
+
+4. **Crawler & SSRF Tests (`tests/test_crawler.py`):**
+   - Strict SSRF blocking: loopback (`127.0.0.1`, `localhost`), cloud metadata (`169.254.169.254`), private IP subnets (`10.0.0.0/8`, `192.168.0.0/16`), and unsupported schemes (`file://`, `ftp://`).
+   - HTTP mocking with `responses`: validates `robots.txt` compliance (skips disallowed paths) and verifies BFS crawl termination at `max_pages`.
+   - HTML parsing and boilerplate extraction resilience against malformed markup.
+
+### Running Tests
+
+Install testing dependencies:
+```bash
+pip install -r requirements-dev.txt
+```
+
+Run all 57+ tests with verbose output:
+```bash
+pytest -v
+```
+
+Run tests with code coverage analysis:
+```bash
+pytest --cov=. --cov-report=term-missing
+```
+
+### Continuous Integration (CI)
+
+A GitHub Actions workflow ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) automatically executes the test suite across **Python 3.11 and 3.12** on every push and pull request to `main`.
+

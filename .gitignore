@@ -32,3 +32,11 @@ crawled_pages/*.json
 instance/
 *.db
 *.sqlite3
+
+# Test & coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
